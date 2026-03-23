@@ -1,3 +1,19 @@
+function getResultTransportLimits() {
+  var runtime =
+    typeof WS_DEFS_CONFIG === 'object' &&
+    WS_DEFS_CONFIG &&
+    WS_DEFS_CONFIG.resultTransport
+      ? WS_DEFS_CONFIG.resultTransport
+      : {};
+
+  return {
+    chunkSizeBytes: Number(runtime.chunkSizeBytes) || 512 * 1024,
+    maxChunkBytes: Number(runtime.maxChunkBytes) || 512 * 1024,
+    maxTotalBytes: Number(runtime.maxTotalBytes) || 24 * 1024 * 1024,
+    maxChunkCount: Number(runtime.maxChunkCount) || 48,
+  };
+}
+
 function trimPayloadForTransport(payload) {
   if (!payload || typeof payload !== 'object') {
     return payload;
@@ -24,29 +40,43 @@ function trimPayloadForTransport(payload) {
     trimmed.designSnapshot.resources &&
     trimmed.designSnapshot.resources.imageAssets
   ) {
-    var imageAssets = trimmed.designSnapshot.resources.imageAssets;
-    for (var hash in imageAssets) {
-      var asset = imageAssets[hash];
-      if (asset && asset.bytesBase64 && typeof asset.bytesBase64 === 'string') {
-        delete asset.bytesBase64;
-        asset.deferredBinary = true;
+    var originalImageAssets = trimmed.designSnapshot.resources.imageAssets;
+    var clonedImageAssets = {};
+    for (var hash in originalImageAssets) {
+      var originalAsset = originalImageAssets[hash];
+      var clonedAsset = originalAsset && typeof originalAsset === 'object'
+        ? Object.assign({}, originalAsset)
+        : originalAsset;
+
+      if (clonedAsset && clonedAsset.bytesBase64 && typeof clonedAsset.bytesBase64 === 'string') {
+        delete clonedAsset.bytesBase64;
+        clonedAsset.deferredBinary = true;
       }
+
+      clonedImageAssets[hash] = clonedAsset;
     }
+
+    trimmed.designSnapshot = Object.assign({}, trimmed.designSnapshot, {
+      resources: Object.assign({}, trimmed.designSnapshot.resources, {
+        imageAssets: clonedImageAssets,
+      }),
+    });
   }
 
   return trimmed;
 }
-
-var CHUNK_SIZE = 512 * 1024;
 
 async function postJobResult(jobId, payload, reportStage) {
   if (reportStage) {
     reportStage.loading('transport.serialize.start', '结果序列化中', null);
   }
 
+  var limits = getResultTransportLimits();
   var transportPayload = trimPayloadForTransport(payload);
-  var body = JSON.stringify(transportPayload);
-  var payloadBytes = body.length;
+  var encoded = encodeJsonUtf8(transportPayload);
+  var body = encoded.json;
+  var payloadBytes = encoded.byteLength;
+  var bodyBytes = encoded.bytes;
 
   if (reportStage) {
     reportStage.ok('transport.serialize.done', '结果序列化完成', {
@@ -60,6 +90,17 @@ async function postJobResult(jobId, payload, reportStage) {
           ? payload.defs.summary.total
           : null,
     });
+  }
+
+  if (payloadBytes > limits.maxTotalBytes) {
+    throw createPluginError(
+      'RESULT_PAYLOAD_TOO_LARGE',
+      '结果字节超出上限: ' + payloadBytes + ' > ' + limits.maxTotalBytes,
+      { payloadBytes: payloadBytes, maxTotalBytes: limits.maxTotalBytes }
+    );
+  }
+
+  if (reportStage) {
     reportStage.loading('transport.post.start', '结果回传 bridge 中', {
       payloadBytes: payloadBytes,
     });
@@ -67,7 +108,7 @@ async function postJobResult(jobId, payload, reportStage) {
 
   var resultUrl = BRIDGE_BASE_URL + '/jobs/' + encodeURIComponent(jobId) + '/result';
 
-  if (payloadBytes <= CHUNK_SIZE) {
+  if (payloadBytes <= limits.chunkSizeBytes) {
     var response = await fetch(resultUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -89,17 +130,37 @@ async function postJobResult(jobId, payload, reportStage) {
     return result;
   }
 
-  var totalChunks = Math.ceil(payloadBytes / CHUNK_SIZE);
+  var totalChunks = Math.ceil(payloadBytes / limits.chunkSizeBytes);
+
+  if (totalChunks > limits.maxChunkCount) {
+    throw createPluginError(
+      'RESULT_CHUNK_COUNT_EXCEEDED',
+      '结果分块数超出上限: ' + totalChunks + ' > ' + limits.maxChunkCount,
+      { totalChunks: totalChunks, maxChunkCount: limits.maxChunkCount }
+    );
+  }
+
   if (reportStage) {
     reportStage.loading('transport.chunked.start', '分块回传中', {
       totalChunks: totalChunks,
-      chunkSize: CHUNK_SIZE,
+      chunkSizeBytes: limits.chunkSizeBytes,
       payloadBytes: payloadBytes,
     });
   }
 
   for (var i = 0; i < totalChunks; i += 1) {
-    var chunk = body.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    var start = i * limits.chunkSizeBytes;
+    var end = Math.min(start + limits.chunkSizeBytes, bodyBytes.length);
+    var chunk = bodyBytes.subarray(start, end);
+
+    if (chunk.byteLength > limits.maxChunkBytes) {
+      throw createPluginError(
+        'RESULT_CHUNK_TOO_LARGE',
+        '结果单块超出上限: ' + chunk.byteLength + ' > ' + limits.maxChunkBytes,
+        { chunkIndex: i, chunkBytes: chunk.byteLength, maxChunkBytes: limits.maxChunkBytes }
+      );
+    }
+
     var chunkRes = await fetch(resultUrl, {
       method: 'POST',
       headers: {

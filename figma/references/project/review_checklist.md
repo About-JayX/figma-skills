@@ -9,6 +9,7 @@
 | 3 | Config sync + UI build + legacy bundle | `npm run build:legacy` | |
 | 4 | Generated artifacts consistency | `npm run verify:artifacts` | |
 | 5 | Bridge server startup + /health + client | `npm run verify:bridge` | |
+| 6 | Result chunk limits + UTF-8 round-trip | `npm run verify:chunks` | |
 
 Run all at once: `npm run verify`
 
@@ -50,3 +51,6 @@ Run all at once: `npm run verify`
 ## Remaining Risks
 - `ui.html` loads `<script src="./generated/runtime-config.js">` and `<script src="./generated/ui.js">` — Figma Desktop resolves these relative to the plugin directory. If Figma changes how UI HTML is loaded (e.g., string injection instead of file-based iframe), these references would break.
 - `allowedDomains: ["none"]` means the plugin only works in development mode. Production deployment would require configuring allowed domains.
+- Result chunk transport now enforces single-chunk, cumulative, and count limits (413 rejection). Multi-byte characters use UTF-8 byte-based chunking.
+- Image asset `getBytesAsync()` still reads full binary before size check; peak memory risk for oversized images not yet mitigated (deferred to next step).
+- Real Figma Desktop large-payload / large-image smoke test not yet completed.

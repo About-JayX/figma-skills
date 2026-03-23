@@ -82,6 +82,30 @@ export const JSON_BODY_MAX_BYTES = parsePositiveInteger(
   'FIGMA_BRIDGE_JSON_BODY_MAX_BYTES'
 );
 
+export const RESULT_CHUNK_SIZE_BYTES = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_RESULT_CHUNK_SIZE_BYTES,
+  512 * 1024,
+  'FIGMA_BRIDGE_RESULT_CHUNK_SIZE_BYTES'
+);
+
+export const RESULT_CHUNK_MAX_BYTES = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_RESULT_CHUNK_MAX_BYTES,
+  RESULT_CHUNK_SIZE_BYTES,
+  'FIGMA_BRIDGE_RESULT_CHUNK_MAX_BYTES'
+);
+
+export const RESULT_CHUNK_MAX_TOTAL_BYTES = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES,
+  24 * 1024 * 1024,
+  'FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES'
+);
+
+export const RESULT_CHUNK_MAX_COUNT = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_RESULT_CHUNK_MAX_COUNT,
+  Math.ceil(RESULT_CHUNK_MAX_TOTAL_BYTES / RESULT_CHUNK_SIZE_BYTES),
+  'FIGMA_BRIDGE_RESULT_CHUNK_MAX_COUNT'
+);
+
 export function getBridgeRuntimeConfig() {
   return {
     bindHost: BRIDGE_BIND_HOST,
@@ -91,6 +115,12 @@ export function getBridgeRuntimeConfig() {
     eventsUrl: BRIDGE_EVENTS_URL,
     extractNodeDefsUrl: `${BRIDGE_ORIGIN}/extract-node-defs`,
     extractImageAssetUrl: `${BRIDGE_ORIGIN}/extract-image-asset`,
+    resultTransport: {
+      chunkSizeBytes: RESULT_CHUNK_SIZE_BYTES,
+      maxChunkBytes: RESULT_CHUNK_MAX_BYTES,
+      maxTotalBytes: RESULT_CHUNK_MAX_TOTAL_BYTES,
+      maxChunkCount: RESULT_CHUNK_MAX_COUNT,
+    },
   };
 }
 

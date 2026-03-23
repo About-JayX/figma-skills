@@ -66,9 +66,40 @@ function withTimeout(promise, timeoutMs, label) {
   });
 }
 
+var UTF8_TEXT_ENCODER = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+
+function encodeUtf8Text(text) {
+  var value = typeof text === 'string' ? text : String(text == null ? '' : text);
+
+  if (UTF8_TEXT_ENCODER) {
+    return UTF8_TEXT_ENCODER.encode(value);
+  }
+
+  var encoded = unescape(encodeURIComponent(value));
+  var bytes = new Uint8Array(encoded.length);
+  for (var i = 0; i < encoded.length; i += 1) {
+    bytes[i] = encoded.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function getUtf8ByteLength(text) {
+  return encodeUtf8Text(text).length;
+}
+
+function encodeJsonUtf8(value) {
+  var json = JSON.stringify(value);
+  var bytes = encodeUtf8Text(json);
+  return {
+    json: json,
+    bytes: bytes,
+    byteLength: bytes.length,
+  };
+}
+
 function estimateJsonBytes(value) {
   try {
-    return JSON.stringify(value).length;
+    return encodeJsonUtf8(value).byteLength;
   } catch (error) {
     return null;
   }

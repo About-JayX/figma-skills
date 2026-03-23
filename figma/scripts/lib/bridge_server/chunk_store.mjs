@@ -1,3 +1,9 @@
+import {
+  RESULT_CHUNK_MAX_BYTES,
+  RESULT_CHUNK_MAX_COUNT,
+  RESULT_CHUNK_MAX_TOTAL_BYTES,
+} from '../bridge_config.mjs';
+
 function parseChunkHeader(value) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isInteger(parsed) ? parsed : null;
@@ -28,10 +34,29 @@ export function appendJobResultChunk(
     };
   }
 
+  if (chunkTotal > RESULT_CHUNK_MAX_COUNT) {
+    return {
+      ok: false,
+      statusCode: 413,
+      error: '结果分块数超出上限',
+      errorCode: 'RESULT_CHUNK_COUNT_EXCEEDED',
+    };
+  }
+
+  if (rawBody.length > RESULT_CHUNK_MAX_BYTES) {
+    return {
+      ok: false,
+      statusCode: 413,
+      error: '结果单块超出上限',
+      errorCode: 'RESULT_CHUNK_TOO_LARGE',
+    };
+  }
+
   let entry = state.pendingChunks.get(jobId);
   if (!entry) {
     entry = {
       total: chunkTotal,
+      totalBytes: 0,
       received: new Map(),
     };
     state.pendingChunks.set(jobId, entry);
@@ -47,7 +72,23 @@ export function appendJobResultChunk(
     };
   }
 
+  const previous = entry.received.get(chunkIndex);
+  if (previous) {
+    entry.totalBytes -= previous.length;
+  }
+
   entry.received.set(chunkIndex, rawBody);
+  entry.totalBytes += rawBody.length;
+
+  if (entry.totalBytes > RESULT_CHUNK_MAX_TOTAL_BYTES) {
+    state.pendingChunks.delete(jobId);
+    return {
+      ok: false,
+      statusCode: 413,
+      error: '结果累计字节超出上限',
+      errorCode: 'RESULT_CHUNK_TOTAL_TOO_LARGE',
+    };
+  }
 
   if (entry.received.size < chunkTotal) {
     return {
@@ -55,6 +96,7 @@ export function appendJobResultChunk(
       complete: false,
       chunkIndex,
       pending: chunkTotal - entry.received.size,
+      receivedBytes: entry.totalBytes,
     };
   }
 

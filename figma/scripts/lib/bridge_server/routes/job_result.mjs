@@ -1,4 +1,8 @@
 import {
+  RESULT_CHUNK_MAX_BYTES,
+  RESULT_CHUNK_MAX_TOTAL_BYTES,
+} from '../../bridge_config.mjs';
+import {
   readBinaryBody,
   readJsonBody,
   writeJson,
@@ -39,12 +43,19 @@ export async function handleJobResultRequest(state, req, res, jobId) {
   if (chunkIndex !== undefined && chunkTotal !== undefined) {
     let rawBody;
     try {
-      rawBody = await readBinaryBody(req);
+      rawBody = await readBinaryBody(req, {
+        maxBytes: RESULT_CHUNK_MAX_BYTES,
+        errorCode: 'RESULT_CHUNK_TOO_LARGE',
+        label: 'result chunk',
+      });
     } catch (error) {
-      writeJson(res, 400, {
+      const errorCode = error && error.code ? error.code : 'INVALID_CHUNK_BODY';
+      const statusCode = errorCode === 'RESULT_CHUNK_TOO_LARGE' ? 413 : 400;
+
+      writeJson(res, statusCode, {
         ok: false,
         error: '分块请求体读取失败',
-        errorCode: error && error.code ? error.code : 'INVALID_CHUNK_BODY',
+        errorCode,
       });
       return;
     }
@@ -101,12 +112,15 @@ export async function handleJobResultRequest(state, req, res, jobId) {
 
   let payload;
   try {
-    payload = await readJsonBody(req);
+    payload = await readJsonBody(req, RESULT_CHUNK_MAX_TOTAL_BYTES);
   } catch (error) {
-    writeJson(res, 400, {
+    const errorCode = error && error.code ? error.code : 'INVALID_JSON';
+    const statusCode = errorCode === 'JSON_BODY_TOO_LARGE' ? 413 : 400;
+
+    writeJson(res, statusCode, {
       ok: false,
       error: '结果回传不是合法 JSON',
-      errorCode: 'INVALID_JSON',
+      errorCode,
     });
     return;
   }

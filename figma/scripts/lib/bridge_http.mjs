@@ -54,15 +54,40 @@ export async function readJsonBody(req, maxBytes = JSON_BODY_MAX_BYTES) {
   return JSON.parse(text);
 }
 
-export async function readBinaryBody(req, maxBytes) {
+function normalizeBinaryBodyOptions(options) {
+  if (typeof options === 'number') {
+    return {
+      maxBytes: options,
+      errorCode: 'BINARY_BODY_TOO_LARGE',
+      label: 'binary body',
+    };
+  }
+
+  return {
+    maxBytes: options && options.maxBytes ? options.maxBytes : 0,
+    errorCode:
+      options && typeof options.errorCode === 'string'
+        ? options.errorCode
+        : 'BINARY_BODY_TOO_LARGE',
+    label:
+      options && typeof options.label === 'string'
+        ? options.label
+        : 'binary body',
+  };
+}
+
+export async function readBinaryBody(req, options) {
+  const normalized = normalizeBinaryBodyOptions(options);
   const chunks = [];
   let total = 0;
 
   for await (const chunk of req) {
     total += chunk.length;
-    if (maxBytes && total > maxBytes) {
-      const error = new Error(`asset payload exceeds maxBytes=${maxBytes}`);
-      error.code = 'ASSET_TOO_LARGE';
+    if (normalized.maxBytes && total > normalized.maxBytes) {
+      const error = new Error(
+        `${normalized.label} exceeds maxBytes=${normalized.maxBytes}`
+      );
+      error.code = normalized.errorCode;
       throw error;
     }
     chunks.push(chunk);
