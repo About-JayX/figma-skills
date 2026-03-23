@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "task": {
+    "name": "pricing page replay"
+  },
+  "entries": [
+    {
+      "id": "page-home",
+      "mode": "page",
+      "kind": "page",
+      "surface": "app-renderer",
+      "baseline": "baseline/page-home.png",
+      "candidate": "candidate/page-home.png",
+      "route": "DOM_GRID",
+      "nodeId": "1:2",
+      "signals": {
+        "hasGrid": true,
+        "hasText": true
+      }
+    },
+    {
+      "id": "hero-visual",
+      "mode": "hard-node",
+      "kind": "hard-node",
+      "surface": "app-renderer",
+      "baseline": "baseline/hero-visual.png",
+      "candidate": "candidate/hero-visual.png",
+      "route": "DOM_NATIVE",
+      "nodeId": "1:99",
+      "signals": {
+        "hasMask": true,
+        "hasComplexStroke": true
+      }
+    }
+  ]
+}

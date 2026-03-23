@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body{font-family:sans-serif;margin:0;padding:12px;font-size:12px}
+  #bridge{padding:8px 10px;border-radius:6px;background:#f6f8fa;margin-bottom:10px;color:#666}
+  #bridge.ok{background:#e3f9e5;color:#1a7f37}
+  #bridge.error{background:#ffeef0;color:#cf222e}
+  #bridge.loading{color:#888}
+  #status{padding:8px 10px;border-radius:6px;background:#f0f0f0;margin-bottom:10px;min-height:20px}
+  #status.ok{background:#e3f9e5;color:#1a7f37}
+  #status.error{background:#ffeef0;color:#cf222e}
+  #status.loading{color:#888}
+  #hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:10px}
+  button{width:100%;padding:7px;border:none;border-radius:5px;background:#111827;color:#fff;cursor:pointer;font-size:12px}
+  button:hover{background:#0f172a}
+  #log{margin-top:8px;font-size:10px;color:#999;height:86px;overflow-y:auto}
+</style>
+</head>
+<body>
+<div id="bridge" class="loading">Bridge SSE 连接中...</div>
+<div id="status" class="loading">初始化中...</div>
+<div id="hint">插件默认不会自动提取。只有收到 Bridge 的 extract-node-defs / extract-image-asset 指令时才会执行并回传结果。</div>
+<button id="reconnect-button" type="button">重新连接 SSE</button>
+<button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">获取选中节点 ID</button>
+<div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="点击复制"></div>
+<div id="log"></div>
+<script src="./generated/runtime-config.js"></script>
+<script src="./generated/ui.js"></script>
+</body>
+</html>

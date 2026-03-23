@@ -1,0 +1,14 @@
+interface:
+  display_name: "Figma Replay"
+  short_description: "Use local figma bridge first, then supplement with figma mcp, to capture replay-first figma bundles, route hard nodes, and verify high-fidelity implementation"
+  icon_small: "./assets/figma-small.svg"
+  icon_large: "./assets/figma.png"
+  default_prompt: "Use $figma to start the local bridge, capture the live node payload through ws_defs, organize the result as a replay-first bundle, treat designSnapshot as truth, treat css and restSnapshot as hints or reconciliation, classify nodes by route, prefer DOM only for stable layout regions, escalate hard nodes to svg or canvas islands, supplement with MCP screenshots and Code Connect, and verify with explicit diff evidence before claiming high fidelity."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "figma"
+      description: "Figma MCP server"
+      transport: "streamable_http"
+      url: "https://mcp.figma.com/mcp"
