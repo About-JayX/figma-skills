@@ -33,8 +33,8 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
       'JSON_REST_V1'
     );
     diagnostics.included = true;
-    var snapshotJson = JSON.stringify(snapshot);
-    diagnostics.bytes = snapshotJson.length;
+    var snapshotBytes = estimateJsonBytes(snapshot);
+    diagnostics.bytes = snapshotBytes != null ? snapshotBytes : JSON.stringify(snapshot).length;
 
     if (diagnostics.bytes > mergedOptions.restMaxBytes) {
       diagnostics.truncated = true;

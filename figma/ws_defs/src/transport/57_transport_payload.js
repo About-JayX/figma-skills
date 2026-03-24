@@ -9,7 +9,7 @@ function getResultTransportLimits() {
   return {
     chunkSizeBytes: Number(runtime.chunkSizeBytes) || 512 * 1024,
     maxChunkBytes: Number(runtime.maxChunkBytes) || 512 * 1024,
-    maxTotalBytes: Number(runtime.maxTotalBytes) || 24 * 1024 * 1024,
+    maxTotalBytes: Number(runtime.maxTotalBytes) || 50 * 1024 * 1024,
     maxChunkCount: Number(runtime.maxChunkCount) || 48,
   };
 }
@@ -23,7 +23,8 @@ function trimPayloadForTransport(payload) {
 
   if (trimmed.restSnapshot && typeof trimmed.restSnapshot === 'object' && !trimmed.restSnapshot.truncated) {
     var restBytes = estimateJsonBytes(trimmed.restSnapshot);
-    if (restBytes !== null && restBytes > 3000000) {
+    var restLimit = DEFAULT_EXTRACTION_OPTIONS.restMaxBytes;
+    if (restBytes !== null && restBytes > restLimit) {
       trimmed.restSnapshot = {
         truncated: true,
         bytes: restBytes,

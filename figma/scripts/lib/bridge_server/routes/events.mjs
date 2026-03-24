@@ -30,6 +30,7 @@ export function handleEventsRequest(state, req, res) {
   state.pluginClients.set(clientId, {
     clientId,
     connectedAt,
+    fileKey: null,
     res,
     heartbeat,
   });

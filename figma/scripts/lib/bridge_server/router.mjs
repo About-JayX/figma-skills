@@ -1,4 +1,4 @@
-import { setCorsHeaders, writeJson } from '../bridge_http.mjs';
+import { readJsonBody, setCorsHeaders, writeJson } from '../bridge_http.mjs';
 import { handleEventsRequest } from './routes/events.mjs';
 import { handleExtractImageAssetRequest } from './routes/extract_image_asset.mjs';
 import { handleExtractNodeDefsRequest } from './routes/extract_node_defs.mjs';
@@ -25,6 +25,26 @@ export function createBridgeServerRequestHandler(state) {
 
     if (req.method === 'GET' && url.pathname === '/events') {
       handleEventsRequest(state, req, res);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/register') {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        writeJson(res, 400, { ok: false, error: 'Invalid JSON', errorCode: 'INVALID_JSON' });
+        return;
+      }
+      const clientId = body && typeof body.clientId === 'string' ? body.clientId : '';
+      const fileKey = body && typeof body.fileKey === 'string' ? body.fileKey : null;
+      const client = state.pluginClients.get(clientId);
+      if (!client) {
+        writeJson(res, 404, { ok: false, error: '未找到该 clientId', errorCode: 'CLIENT_NOT_FOUND' });
+        return;
+      }
+      client.fileKey = fileKey || null;
+      writeJson(res, 200, { ok: true, clientId, fileKey: client.fileKey });
       return;
     }
 

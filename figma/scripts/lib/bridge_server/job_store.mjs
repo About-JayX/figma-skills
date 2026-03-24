@@ -72,9 +72,17 @@ export function getPendingJob(state, jobId) {
   return state.pendingJobs.get(jobId) || null;
 }
 
-export function getPrimaryPluginClient(state) {
+export function getPrimaryPluginClient(state, fileKey) {
   const clients = Array.from(state.pluginClients.values());
-  return clients.length > 0 ? clients[clients.length - 1] : null;
+  if (!clients.length) return null;
+
+  if (fileKey) {
+    const matched = clients.filter((c) => c.fileKey === fileKey);
+    if (matched.length > 0) return matched[matched.length - 1];
+  }
+
+  // Fallback: last connected client (single-client backward compat)
+  return clients[clients.length - 1];
 }
 
 export function attachAssetWaiter(job) {

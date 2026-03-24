@@ -36,7 +36,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
     return;
   }
 
-  const pluginClient = getPrimaryPluginClient(state);
+  const pluginClient = getPrimaryPluginClient(state, target.fileKey);
   if (!pluginClient) {
     writeJson(res, 409, {
       ok: false,

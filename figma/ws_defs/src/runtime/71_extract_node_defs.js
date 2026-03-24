@@ -51,11 +51,21 @@ async function handleExtractNodeDefs(command) {
         ? extraction.diagnostics.designSnapshot.imageAssets.resolved
         : null,
   });
-  const resolvedFileKey = target.fileKey || null;
+  var resolvedFileKey = target.fileKey || null;
+  try {
+    if (!resolvedFileKey && typeof figma !== 'undefined' && figma.fileKey) {
+      resolvedFileKey = figma.fileKey;
+    }
+  } catch (_) {}
+  var figmaUrl = null;
+  if (resolvedFileKey && target.nodeId) {
+    figmaUrl = 'https://www.figma.com/design/' + resolvedFileKey + '/?node-id=' + encodeURIComponent(target.nodeId);
+  }
   const payload = {
     ok: true,
     jobId: jobId,
     fileKey: resolvedFileKey,
+    figmaUrl: figmaUrl,
     nodeId: target.nodeId,
     node: serializeNodeInfo(node),
     defs: defs,

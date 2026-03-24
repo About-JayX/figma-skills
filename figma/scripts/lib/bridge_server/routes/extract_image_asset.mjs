@@ -45,7 +45,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
     return;
   }
 
-  const pluginClient = getPrimaryPluginClient(state);
+  const pluginClient = getPrimaryPluginClient(state, target && target.fileKey);
   if (!pluginClient) {
     writeJson(res, 409, {
       ok: false,

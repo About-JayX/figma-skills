@@ -21,7 +21,13 @@ function normalizeJobResult(job, payload) {
         };
 
   result.jobId = job.jobId;
-  result.target = job.target;
+  result.target = Object.assign({}, job.target);
+  if (!result.target.fileKey && result.fileKey) {
+    result.target.fileKey = result.fileKey;
+  }
+  if (!result.target.url && result.figmaUrl) {
+    result.target.url = result.figmaUrl;
+  }
   result.returnedAt = new Date().toISOString();
   return result;
 }
@@ -52,6 +58,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
       const errorCode = error && error.code ? error.code : 'INVALID_CHUNK_BODY';
       const statusCode = errorCode === 'RESULT_CHUNK_TOO_LARGE' ? 413 : 400;
 
+      job.reject(Object.assign(new Error('分块请求体读取失败'), { code: errorCode }));
       writeJson(res, statusCode, {
         ok: false,
         error: '分块请求体读取失败',
@@ -69,6 +76,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     );
 
     if (!chunkState.ok) {
+      job.reject(Object.assign(new Error(chunkState.error), { code: chunkState.errorCode }));
       writeJson(res, chunkState.statusCode, {
         ok: false,
         error: chunkState.error,
@@ -91,6 +99,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     try {
       payload = JSON.parse(chunkState.body);
     } catch (error) {
+      job.reject(Object.assign(new Error('分块重组后 JSON 解析失败'), { code: 'INVALID_JSON' }));
       writeJson(res, 400, {
         ok: false,
         error: '分块重组后 JSON 解析失败',
@@ -117,6 +126,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     const errorCode = error && error.code ? error.code : 'INVALID_JSON';
     const statusCode = errorCode === 'JSON_BODY_TOO_LARGE' ? 413 : 400;
 
+    job.reject(Object.assign(new Error('结果回传不是合法 JSON'), { code: errorCode }));
     writeJson(res, statusCode, {
       ok: false,
       error: '结果回传不是合法 JSON',

@@ -4,6 +4,18 @@ import { storePendingAsset } from '../asset_store.mjs';
 import { getPendingJob } from '../job_store.mjs';
 
 export async function handleJobAssetRequest(state, req, res, jobId) {
+  const job = getPendingJob(state, jobId);
+  if (!job) {
+    // Drain the request body to prevent connection hang
+    req.resume();
+    writeJson(res, 404, {
+      ok: false,
+      error: `未找到待处理 job ${jobId}，资产上传被拒绝`,
+      errorCode: 'JOB_NOT_FOUND',
+    });
+    return;
+  }
+
   let body;
   try {
     body = await readBinaryBody(req, ASSET_MAX_BYTES);
@@ -31,8 +43,7 @@ export async function handleJobAssetRequest(state, req, res, jobId) {
     receivedAt: new Date().toISOString(),
   });
 
-  const job = getPendingJob(state, jobId);
-  if (job && typeof job.assetResolve === 'function') {
+  if (typeof job.assetResolve === 'function') {
     job.assetResolve(assetData);
   }
 

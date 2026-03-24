@@ -189,7 +189,10 @@ function testUtf8RoundTrip() {
         fail(label, `Final chunk result not complete`);
         return;
       }
-      if (result.body !== original) {
+      const reassembled = Buffer.isBuffer(result.body)
+        ? result.body.toString('utf8')
+        : result.body;
+      if (reassembled !== original) {
         fail(label, 'Reassembled body does not match original');
         return;
       }
