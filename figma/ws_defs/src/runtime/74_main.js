@@ -1,6 +1,6 @@
 async function main() {
   if (typeof figma.skipInvisibleInstanceChildren === 'boolean') {
-    figma.skipInvisibleInstanceChildren = true;
+    figma.skipInvisibleInstanceChildren = false;
   }
 
   figma.ui.postMessage({

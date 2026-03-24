@@ -104,6 +104,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip expensive metrics (SSIM, DeltaE00) when pixel_diff already far exceeds threshold",
     )
+    parser.add_argument(
+        "--max-pixels",
+        type=int,
+        default=25_000_000,
+        help="Safety limit: refuse to process images exceeding this pixel count (default 25M). Use --crop to reduce.",
+    )
     return parser.parse_args()
 
 
@@ -427,6 +433,7 @@ def generate_report(
     max_color_samples: int = 250000,
     crop: str | None = None,
     early_exit: bool = False,
+    max_pixels: int = 25_000_000,
 ) -> Dict[str, Any]:
     baseline_path = baseline_path.expanduser().resolve()
     candidate_path = candidate_path.expanduser().resolve()
@@ -439,6 +446,22 @@ def generate_report(
 
     raw_baseline = load_rgba(baseline_path)
     raw_candidate = load_rgba(candidate_path)
+
+    # After crop (if any), check pixel budget before heavy computation
+    effective_b = raw_baseline
+    effective_c = raw_candidate
+    if crop_rect:
+        x, y, w, h = crop_rect
+        effective_b = raw_baseline[y:y+h, x:x+w]
+        effective_c = raw_candidate[y:y+h, x:x+w]
+    max_h = max(effective_b.shape[0], effective_c.shape[0])
+    max_w = max(effective_b.shape[1], effective_c.shape[1])
+    canvas_pixels = max_h * max_w
+    if max_pixels and canvas_pixels > max_pixels:
+        raise ValueError(
+            f"Canvas {max_w}x{max_h} = {canvas_pixels:,} pixels exceeds --max-pixels {max_pixels:,}. "
+            f"Use --crop to reduce the comparison region."
+        )
 
     if crop_rect:
         x, y, w, h = crop_rect
@@ -537,6 +560,7 @@ def main() -> int:
         max_color_samples=args.max_color_samples,
         crop=args.crop,
         early_exit=args.early_exit,
+        max_pixels=args.max_pixels,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.fail_on_thresholds and not report["thresholds"]["passed"]:

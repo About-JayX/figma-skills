@@ -3,7 +3,7 @@ interface:
   short_description: "Use local figma bridge first, then supplement with figma mcp, to capture replay-first figma bundles, route hard nodes, and verify high-fidelity implementation"
   icon_small: "./assets/figma-small.svg"
   icon_large: "./assets/figma.png"
-  default_prompt: "Use $figma to start the local bridge, capture the live node payload through ws_defs, organize the result as a replay-first bundle, treat designSnapshot as truth, treat css and restSnapshot as hints or reconciliation, classify nodes by route, prefer DOM only for stable layout regions, escalate hard nodes to svg or canvas islands, supplement with MCP screenshots and Code Connect, and verify with explicit diff evidence before claiming high fidelity."
+  default_prompt: "Use $figma to start the local bridge in audit mode (includeInvisibleInstanceChildren=true), capture the live node payload through ws_defs, organize the result as a replay-first bundle. Treat designSnapshot as truth, css and restSnapshot as hints. Before writing code: generate a node audit table (mark HIDDEN/OPACITY=0 nodes), handle all HIGH cross-validation warnings. Classify nodes by route, prefer DOM for stable layout, escalate hard nodes to svg/canvas. For acceptance: use region-first verification (--crop + --mode region), never run full-page scorecard on images >25M pixels, use --early-exit when pixel_diff far exceeds threshold. Do not load bridge-response.json or full restSnapshot into context. Supplement with MCP screenshots and Code Connect, and verify with explicit diff evidence before claiming high fidelity."
 
 dependencies:
   tools:

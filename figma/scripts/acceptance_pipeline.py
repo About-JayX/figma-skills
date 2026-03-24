@@ -227,6 +227,8 @@ def main() -> int:
                 heatmap_path=heatmap_path,
                 lpips=args.lpips,
                 max_color_samples=args.max_color_samples,
+                early_exit=True,
+                max_pixels=25_000_000,
             )
             entry_plan = build_entry_plan(entry, report)
             iteration_entry_plans.append(entry_plan)

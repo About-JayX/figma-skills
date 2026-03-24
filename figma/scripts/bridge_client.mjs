@@ -13,6 +13,13 @@ import {
   STARTUP_RETRIES,
   STARTUP_WAIT_MS,
 } from './lib/bridge_config.mjs';
+import {
+  buildAgentPayload as buildAgentPayloadV4,
+  buildCacheManifest as buildCacheManifestV4,
+  ensureCacheDirForResult,
+  materializeEmbeddedImageAssets,
+  persistBridgeResult as persistBridgeResultV4,
+} from './lib/bridge_cache.mjs';
 import { parseTarget } from './lib/bridge_target.mjs';
 
 function sleep(ms) {
@@ -87,30 +94,8 @@ async function ensureBridge() {
   };
 }
 
-function buildMeta(data) {
-  return {
-    jobId: data && data.jobId ? data.jobId : null,
-    target: data && data.target ? data.target : null,
-    node: data && data.node ? data.node : null,
-    extractedAt: data && data.extractedAt ? data.extractedAt : null,
-    returnedAt: data && data.returnedAt ? data.returnedAt : null,
-  };
-}
-
 function buildAgentPayload(data) {
-  const defs = data && data.defs ? data.defs : {};
-  return {
-    meta: buildMeta(data),
-    defs: {
-      flat: defs.flat || {},
-      full: defs.full || null,
-      summary: defs.summary || null,
-      unresolvedAliasIds: Array.isArray(defs.unresolvedAliasIds) ? defs.unresolvedAliasIds : [],
-    },
-    designSnapshot: data && data.designSnapshot ? data.designSnapshot : null,
-    restSnapshot: data && data.restSnapshot ? data.restSnapshot : null,
-    diagnostics: data && data.diagnostics ? data.diagnostics : null,
-  };
+  return buildAgentPayloadV4(data);
 }
 
 function buildPluginInstallHint() {
@@ -148,171 +133,9 @@ function getCacheDir(data) {
   );
 }
 
-function writeJson(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-function normalizeAssetExtension(asset) {
-  if (!asset || typeof asset !== 'object') {
-    return 'bin';
-  }
-
-  const format = typeof asset.format === 'string' ? asset.format.toLowerCase() : '';
-  if (format === 'jpeg') {
-    return 'jpg';
-  }
-
-  if (format) {
-    return format;
-  }
-
-  const mimeType = typeof asset.mimeType === 'string' ? asset.mimeType.toLowerCase() : '';
-  if (mimeType === 'image/jpeg') {
-    return 'jpg';
-  }
-  if (mimeType === 'image/png') {
-    return 'png';
-  }
-  if (mimeType === 'image/gif') {
-    return 'gif';
-  }
-  if (mimeType === 'image/webp') {
-    return 'webp';
-  }
-  if (mimeType === 'image/avif') {
-    return 'avif';
-  }
-
-  return 'bin';
-}
-
-function materializeImageAssets(data, cacheDir) {
-  const resources =
-    data && data.designSnapshot && data.designSnapshot.resources
-      ? data.designSnapshot.resources
-      : null;
-  const imageAssets =
-    resources && resources.imageAssets && typeof resources.imageAssets === 'object'
-      ? resources.imageAssets
-      : null;
-
-  if (!imageAssets) {
-    return {};
-  }
-
-  const assetsDir = path.join(cacheDir, 'assets');
-  const assetFiles = {};
-
-  for (const [hash, asset] of Object.entries(imageAssets)) {
-    if (!asset || typeof asset !== 'object') {
-      continue;
-    }
-
-    const byteString = typeof asset.bytesBase64 === 'string' ? asset.bytesBase64 : '';
-    if (!byteString) {
-      continue;
-    }
-
-    fs.mkdirSync(assetsDir, { recursive: true });
-    const extension = normalizeAssetExtension(asset);
-    const fileName = `${sanitizePathPart(hash)}.${extension}`;
-    const filePath = path.join(assetsDir, fileName);
-
-    fs.writeFileSync(filePath, Buffer.from(byteString, 'base64'));
-
-    asset.fileName = fileName;
-    asset.relativePath = path.relative(cacheDir, filePath);
-    asset.localPath = filePath;
-    delete asset.bytesBase64;
-
-    assetFiles[hash] = {
-      fileName,
-      relativePath: asset.relativePath,
-      localPath: filePath,
-      format: asset.format || null,
-      mimeType: asset.mimeType || null,
-      width: typeof asset.width === 'number' ? asset.width : null,
-      height: typeof asset.height === 'number' ? asset.height : null,
-      byteLength: typeof asset.byteLength === 'number' ? asset.byteLength : null,
-    };
-  }
-
-  return assetFiles;
-}
 
 function persistBridgeResult(result) {
-  if (!result || result.ok === false || !result.target) {
-    return null;
-  }
-
-  return persistArtifacts(result);
-}
-
-function buildCacheManifest(data, cacheDir, assetFiles) {
-  const target = data && data.target ? data.target : {};
-  const node = data && data.node ? data.node : {};
-
-  return {
-    version: 3,
-    fileKey: target.fileKey || null,
-    nodeId: target.nodeId || node.id || null,
-    cacheDir,
-    bridgeFiles: {
-      response: path.join(cacheDir, 'bridge-response.json'),
-      agentPayload: path.join(cacheDir, 'bridge-agent-payload.json'),
-      mergedAgentPayload: path.join(cacheDir, 'merged-agent-payload.json'),
-      assetsDir: path.join(cacheDir, 'assets'),
-    },
-    mcpFiles: {
-      designContext: path.join(cacheDir, 'design-context.md'),
-      variableDefs: path.join(cacheDir, 'variable-defs.json'),
-      screenshotObservation: path.join(cacheDir, 'screenshot-observation.md'),
-      codeConnectMap: path.join(cacheDir, 'code-connect-map.json'),
-      mergeSummary: path.join(cacheDir, 'merge-summary.md'),
-    },
-    assetFiles: assetFiles || {},
-    mergePriority: {
-      bridge: [
-        'layout',
-        'absoluteBoundingBox',
-        'absoluteRenderBounds',
-        'gradientTransform',
-        'fills',
-        'strokes',
-        'effects',
-        'vector',
-        'textSegments',
-        'boundVariables',
-        'inferredVariables',
-        'resolvedVariableModes',
-        'css',
-        'svgString',
-        'restSnapshot',
-        'imageAssets',
-      ],
-      mcp: [
-        'screenshot',
-        'assets',
-        'codeConnect',
-        'componentReuseHints',
-        'remoteDesignContext',
-      ],
-    },
-  };
-}
-
-function persistArtifacts(data) {
-  if (!data || !data.target) {
-    return null;
-  }
-
-  const cacheDir = getCacheDir(data);
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const assetFiles = materializeImageAssets(data, cacheDir);
-  writeJson(path.join(cacheDir, 'bridge-response.json'), data);
-  writeJson(path.join(cacheDir, 'bridge-agent-payload.json'), buildAgentPayload(data));
-  writeJson(path.join(cacheDir, 'cache-manifest.json'), buildCacheManifest(data, cacheDir, assetFiles));
-  return cacheDir;
+  return persistBridgeResultV4(result);
 }
 
 function buildAgentResult(extraction) {

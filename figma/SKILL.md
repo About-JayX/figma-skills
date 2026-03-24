@@ -130,12 +130,35 @@ xxxx    标题         true     1        渲染
 
 **实现完成后必须执行，不可跳过。**
 
+#### 性能 Hard Gate（违反 = 禁止继续验收）
+
+1. **region-first**: 必须先对修改区域做 `--crop` + `--mode region` 验收；只有 region 收敛后才允许 page 级全图验证
+2. **大图保护**: 任一 baseline/candidate 超过 25M 像素（如 2560×10000）时，**禁止**直接跑全图 scorecard，必须先 `--crop` 裁到目标 section
+3. **early-exit**: 当 pixel_diff_ratio 远超阈值时，必须加 `--early-exit` 跳过 SSIM/DeltaE00 全量计算；先缩小区域再做精细验收
+4. **并发限制**: 大图验收、rerender、baseline 生成禁止多 entry 并行；单次只允许一个重型验收任务运行
+5. **大对象读取限制**: 默认只读 `bridge-agent-payload.json`、`cross-validation-report.json`、`merge-summary.md`；除非排查具体字段 bug，禁止把 `bridge-response.json` 或完整 `restSnapshot` 整包加载到上下文
+
+#### 验收命令
+
 在当前 skill 根目录执行：
 
 ```bash
+# region-first: 先验收修改的 section（推荐）
 python3 ./scripts/fidelity_scorecard.py \
-  --baseline <pipeline生成的baseline.png> \
-  --candidate <截图> --mode region
+  --baseline <baseline.png> \
+  --candidate <截图> --mode region \
+  --crop 0,<section_y>,<width>,<section_height>
+
+# 迭代调试时加 early-exit
+python3 ./scripts/fidelity_scorecard.py \
+  --baseline <baseline.png> \
+  --candidate <截图> --mode region \
+  --crop 0,<section_y>,<width>,<section_height> --early-exit
+
+# region 收敛后再跑 page 级（可选）
+python3 ./scripts/fidelity_scorecard.py \
+  --baseline <baseline.png> \
+  --candidate <截图> --mode page
 ```
 
 如果没有 baseline（pipeline 对 GROUP 类型节点不生成），用 MCP screenshot 作为视觉对照，并说明未走自动 scorecard 的原因。无任何对照时不能宣称"已对齐"。
@@ -154,6 +177,9 @@ python3 ./scripts/fidelity_scorecard.py \
 - [ ] 遇到 hard node 或升级路由时，已 Read `./references/common/replay-system.md`
 - [ ] 如有 token 替代或主题同步，已 Read `./references/bridge/token-extraction.md`
 - [ ] 已按 `./references/common/acceptance.md` 跑完 scorecard / done gate，并说明通过项、失败项、未验收项、已知偏差
+- [ ] 验收走 region-first 顺序：先 crop + region 收敛，再可选 page 级验证
+- [ ] 大图（>25M 像素）未直接跑全图 scorecard，已使用 --crop
+- [ ] 未把 bridge-response.json / restSnapshot 整包加载到上下文
 - [ ] 如需定位 cache、merge 产物或脚本入口，已 Read `./references/bridge/workflow.md`
 
 ## References
