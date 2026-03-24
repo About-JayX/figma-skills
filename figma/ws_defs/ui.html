@@ -41,8 +41,14 @@
       "resultTransport": {
         "chunkSizeBytes": 524288,
         "maxChunkBytes": 524288,
-        "maxTotalBytes": 25165824,
-        "maxChunkCount": 48
+        "maxTotalBytes": 52428800,
+        "maxChunkCount": 100
+      },
+      "blobTransport": {
+        "chunkSizeBytes": 524288,
+        "maxChunkBytes": 524288,
+        "maxTotalBytes": 134217728,
+        "maxChunkCount": 256
       }
     }
   );
@@ -63,8 +69,40 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
 (() => {
   // skills/figma/ws_defs/ui/bridge_sse.ts
   function createBridgeConnection(options) {
-    const { eventsUrl, onBridgeStatus, forwardBridgeCommand: forwardBridgeCommand2 } = options;
+    const { eventsUrl, originUrl, onBridgeStatus, forwardBridgeCommand: forwardBridgeCommand2 } = options;
     let eventSource = null;
+    let currentClientId = null;
+    let currentFileKey = null;
+    let currentDocumentName = null;
+    function doRegister(clientId, fileKey, documentName) {
+      const body = { clientId, fileKey };
+      if (documentName) {
+        body.documentName = documentName;
+      }
+      fetch(originUrl + "/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      }).then((res) => {
+        if (res.ok) {
+          const label = fileKey || documentName || "(unknown)";
+          onBridgeStatus("Bridge SSE 已连接 (fileKey: " + label + ")", "ok");
+        }
+      }).catch(() => {
+      });
+    }
+    function tryRegister() {
+      if (currentClientId && (currentFileKey || currentDocumentName)) {
+        doRegister(currentClientId, currentFileKey, currentDocumentName);
+      }
+    }
+    function registerFileKey(fileKey, documentName) {
+      currentFileKey = fileKey;
+      if (documentName !== void 0) {
+        currentDocumentName = documentName;
+      }
+      tryRegister();
+    }
     function handleBridgeJob(eventName, event, forwardType) {
       try {
         const payload = JSON.parse(event.data || "{}");
@@ -82,10 +120,19 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       if (eventSource) {
         eventSource.close();
       }
+      currentClientId = null;
       onBridgeStatus("Bridge SSE 连接中...", "loading");
       eventSource = new EventSource(eventsUrl);
-      eventSource.addEventListener("ready", () => {
+      eventSource.addEventListener("ready", (event) => {
         onBridgeStatus("Bridge SSE 已连接", "ok");
+        try {
+          const data = JSON.parse(event.data || "{}");
+          if (data.clientId) {
+            currentClientId = data.clientId;
+            tryRegister();
+          }
+        } catch {
+        }
       });
       eventSource.addEventListener("extract-node-defs", (event) => {
         handleBridgeJob(
@@ -103,6 +150,7 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       });
       eventSource.onerror = () => {
         onBridgeStatus("Bridge SSE 已断开，等待重连...", "error");
+        currentClientId = null;
       };
     }
     function disconnect() {
@@ -110,6 +158,7 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
         eventSource.close();
         eventSource = null;
       }
+      currentClientId = null;
     }
     function reconnect() {
       connect();
@@ -117,7 +166,8 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
     return {
       connect,
       disconnect,
-      reconnect
+      reconnect,
+      registerFileKey
     };
   }
 
@@ -158,10 +208,8 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       nodeIdEl.style.display = "block";
       if (ids && ids.length > 0) {
         const lines = ids.map((id) => {
-          if (fileKey) {
-            return "https://www.figma.com/design/" + fileKey + "?node-id=" + encodeURIComponent(id);
-          }
-          return id;
+          const key = fileKey || "DRAFT";
+          return "https://www.figma.com/design/" + key + "?node-id=" + encodeURIComponent(id);
         });
         nodeIdEl.textContent = lines.join("\n");
         nodeIdEl.style.background = "#e3f9e5";
@@ -224,6 +272,7 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
     const dom = createUiDomController();
     const bridge = createBridgeConnection({
       eventsUrl: config.eventsUrl,
+      originUrl: config.origin,
       onBridgeStatus: dom.setBridgeStatus,
       forwardBridgeCommand
     });
@@ -246,6 +295,11 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       }
       if (msg.type === "node-id-result") {
         dom.renderNodeIdResult(msg.ids, msg.fileKey);
+      }
+      if (msg.type === "filekey-info") {
+        const label = msg.fileKey || msg.documentName || "(unknown)";
+        dom.appendLog("fileKey: " + label);
+        bridge.registerFileKey(msg.fileKey, msg.documentName ?? null);
       }
     });
     bridge.connect();

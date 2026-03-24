@@ -86,7 +86,20 @@ async function enrichDesignSnapshotAsync(rootNode, designSnapshot, subtreeNodes,
             'SVG_STRING'
           );
           if (typeof svgString === 'string' && svgString.trim()) {
-            serializedNode.svgString = svgString;
+            if (mergedOptions.uploadSvgBlobs !== false && mergedOptions.jobId) {
+              serializedNode.svgRef = await postJobBlob(
+                mergedOptions.jobId,
+                {
+                  kind: 'svg',
+                  nodeId: node.id,
+                  ext: 'svg',
+                  text: svgString,
+                },
+                reportStage
+              );
+            } else {
+              serializedNode.svgString = svgString;
+            }
             diagnostics.svg.attached += 1;
           }
         } catch (error) {

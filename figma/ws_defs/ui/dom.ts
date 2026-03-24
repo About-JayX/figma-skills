@@ -45,15 +45,15 @@ export function createUiDomController() {
 
     if (ids && ids.length > 0) {
       const lines = ids.map((id) => {
-        if (fileKey) {
-          return (
-            'https://www.figma.com/design/' +
-            fileKey +
-            '?node-id=' +
-            encodeURIComponent(id)
-          );
-        }
-        return id;
+        // Always output a full Figma URL, even if fileKey is unknown.
+        // Use placeholder so downstream tools get a parseable URL rather than a bare node-id.
+        const key = fileKey || 'DRAFT';
+        return (
+          'https://www.figma.com/design/' +
+          key +
+          '?node-id=' +
+          encodeURIComponent(id)
+        );
       });
       nodeIdEl.textContent = lines.join('\n');
       nodeIdEl.style.background = '#e3f9e5';

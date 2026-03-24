@@ -45,7 +45,25 @@ export async function handleExtractImageAssetRequest(state, req, res) {
     return;
   }
 
-  const pluginClient = getPrimaryPluginClient(state, target && target.fileKey);
+  const effectiveFileKey = (target && target.fileKey)
+    || (body && typeof body.fileKey === 'string' ? body.fileKey : null);
+  const { client: pluginClient, ambiguous, mismatch } = getPrimaryPluginClient(state, effectiveFileKey);
+  if (mismatch) {
+    writeJson(res, 409, {
+      ok: false,
+      error: `没有匹配 fileKey "${effectiveFileKey}" 的插件连接`,
+      errorCode: 'FILEKEY_MISMATCH',
+    });
+    return;
+  }
+  if (ambiguous) {
+    writeJson(res, 409, {
+      ok: false,
+      error: '多插件场景下无 fileKey，无法确定路由。请传 Figma URL 或 body.fileKey。',
+      errorCode: 'AMBIGUOUS_ROUTING',
+    });
+    return;
+  }
   if (!pluginClient) {
     writeJson(res, 409, {
       ok: false,

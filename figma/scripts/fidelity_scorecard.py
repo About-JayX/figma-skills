@@ -17,6 +17,7 @@ The script prefers deterministic behavior over convenience:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import gc
 import json
 from pathlib import Path
@@ -24,6 +25,8 @@ from typing import Any, Dict, Tuple
 
 import numpy as np
 from PIL import Image
+
+LOCK_FILE = Path(__file__).resolve().parent / '.scorecard.lock'
 
 try:
     from scipy.ndimage import uniform_filter
@@ -418,10 +421,55 @@ def _parse_crop(crop_str: str | None) -> tuple[int, int, int, int] | None:
     parts = [int(v) for v in crop_str.split(",")]
     if len(parts) != 4:
         raise ValueError(f"--crop expects x,y,w,h but got {crop_str!r}")
-    return (parts[0], parts[1], parts[2], parts[3])
+    x, y, w, h = parts
+    if x < 0 or y < 0:
+        raise ValueError(f"--crop x,y must be non-negative, got x={x}, y={y}")
+    if w <= 0 or h <= 0:
+        raise ValueError(f"--crop w,h must be positive, got w={w}, h={h}")
+    return (x, y, w, h)
 
+
+def _acquire_lock():
+    """Acquire exclusive file lock to prevent concurrent heavy scorecard runs."""
+    lock_fh = open(LOCK_FILE, 'w')
+    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+    return lock_fh
+
+def _release_lock(lock_fh):
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
+    except Exception:
+        pass
 
 def generate_report(
+    *,
+    baseline_path: Path,
+    candidate_path: Path,
+    mode: str = "page",
+    pixel_threshold: int = 16,
+    report_path: Path | None = None,
+    heatmap_path: Path | None = None,
+    lpips: bool = False,
+    max_color_samples: int = 250000,
+    crop: str | None = None,
+    early_exit: bool = False,
+    max_pixels: int = 25_000_000,
+) -> Dict[str, Any]:
+    # Exclusive lock: only one heavy scorecard runs at a time
+    lock_fh = _acquire_lock()
+    try:
+        return _generate_report_locked(
+            baseline_path=baseline_path, candidate_path=candidate_path,
+            mode=mode, pixel_threshold=pixel_threshold,
+            report_path=report_path, heatmap_path=heatmap_path,
+            lpips=lpips, max_color_samples=max_color_samples,
+            crop=crop, early_exit=early_exit, max_pixels=max_pixels,
+        )
+    finally:
+        _release_lock(lock_fh)
+
+def _generate_report_locked(
     *,
     baseline_path: Path,
     candidate_path: Path,
@@ -444,24 +492,39 @@ def generate_report(
 
     crop_rect = _parse_crop(crop)
 
+    # Pre-flight: check pixel budget using image metadata only (no pixel decode)
+    if max_pixels or crop_rect:
+        with Image.open(baseline_path) as _bi:
+            bw, bh = _bi.size
+        with Image.open(candidate_path) as _ci:
+            cw, ch = _ci.size
+        if crop_rect:
+            cx, cy, crw, crh = crop_rect
+            # Validate crop region intersects both images
+            if cx >= bw or cy >= bh:
+                raise ValueError(
+                    f"--crop origin ({cx},{cy}) is outside baseline image ({bw}x{bh})"
+                )
+            if cx >= cw or cy >= ch:
+                raise ValueError(
+                    f"--crop origin ({cx},{cy}) is outside candidate image ({cw}x{ch})"
+                )
+            eff_bw, eff_bh = min(crw, bw - cx), min(crh, bh - cy)
+            eff_cw, eff_ch = min(crw, cw - cx), min(crh, ch - cy)
+        else:
+            eff_bw, eff_bh = bw, bh
+            eff_cw, eff_ch = cw, ch
+        pre_w = max(eff_bw, eff_cw)
+        pre_h = max(eff_bh, eff_ch)
+        pre_pixels = pre_w * pre_h
+        if pre_pixels > max_pixels:
+            raise ValueError(
+                f"Canvas {pre_w}x{pre_h} = {pre_pixels:,} pixels exceeds --max-pixels {max_pixels:,}. "
+                f"Use --crop to reduce the comparison region."
+            )
+
     raw_baseline = load_rgba(baseline_path)
     raw_candidate = load_rgba(candidate_path)
-
-    # After crop (if any), check pixel budget before heavy computation
-    effective_b = raw_baseline
-    effective_c = raw_candidate
-    if crop_rect:
-        x, y, w, h = crop_rect
-        effective_b = raw_baseline[y:y+h, x:x+w]
-        effective_c = raw_candidate[y:y+h, x:x+w]
-    max_h = max(effective_b.shape[0], effective_c.shape[0])
-    max_w = max(effective_b.shape[1], effective_c.shape[1])
-    canvas_pixels = max_h * max_w
-    if max_pixels and canvas_pixels > max_pixels:
-        raise ValueError(
-            f"Canvas {max_w}x{max_h} = {canvas_pixels:,} pixels exceeds --max-pixels {max_pixels:,}. "
-            f"Use --crop to reduce the comparison region."
-        )
 
     if crop_rect:
         x, y, w, h = crop_rect
@@ -478,6 +541,13 @@ def generate_report(
     # pixel diff uses uint8 directly - no float32 needed
     pixel_diff_ratio, diff, different = compute_pixel_diff_ratio(baseline, candidate, pixel_threshold)
 
+    # Save heatmap immediately so we can release diff array before SSIM/DeltaE
+    diff_bounds = compute_diff_bounds(different)
+    heatmap_path.parent.mkdir(parents=True, exist_ok=True)
+    save_heatmap(diff, heatmap_path)
+    del diff, different
+    gc.collect()
+
     preset = PRESETS[mode]
     skipped_expensive = early_exit and pixel_diff_ratio > preset["pixel_diff_ratio_max"] * 5
 
@@ -485,6 +555,8 @@ def generate_report(
         ssim = 0.0
         delta_e00: Dict[str, Any] = {"skipped": True, "reason": "pixel_diff_ratio far exceeds threshold"}
         lpips_result = None
+        del baseline, candidate
+        gc.collect()
     else:
         # convert to float32 only when needed, then free uint8 padded arrays
         baseline_rgb = rgba_to_rgb_float(baseline)
@@ -520,8 +592,7 @@ def generate_report(
         "passed": False,
         "early_exit": True,
     }
-    heatmap_path.parent.mkdir(parents=True, exist_ok=True)
-    save_heatmap(diff, heatmap_path)
+    # heatmap already saved and diff/different already freed above
 
     report: Dict[str, Any] = {
         "ok": True,
@@ -532,7 +603,7 @@ def generate_report(
         "canvas": canvas_meta,
         "metrics": metrics,
         "thresholds": thresholds,
-        "diffBounds": compute_diff_bounds(different),
+        "diffBounds": diff_bounds,
         "notes": [
             "Baseline and candidate are padded to a shared canvas instead of resized.",
             "DeltaE00 uses deterministic spatial subsampling when the image is very large.",

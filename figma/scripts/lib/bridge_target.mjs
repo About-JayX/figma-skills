@@ -54,11 +54,15 @@ export function parseTarget(input) {
     return null;
   }
 
+  const rawFileKey = pathParts[1] || null;
+  // 'DRAFT' is a placeholder for local drafts where figma.fileKey is unavailable
+  const fileKey = rawFileKey === 'DRAFT' ? null : rawFileKey;
+
   return {
     sourceType: 'url',
     raw,
     nodeId,
-    fileKey: pathParts[1] || null,
+    fileKey,
     url: raw,
   };
 }

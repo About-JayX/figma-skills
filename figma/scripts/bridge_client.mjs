@@ -14,8 +14,6 @@ import {
   STARTUP_WAIT_MS,
 } from './lib/bridge_config.mjs';
 import {
-  buildAgentPayload as buildAgentPayloadV4,
-  buildCacheManifest as buildCacheManifestV4,
   ensureCacheDirForResult,
   materializeEmbeddedImageAssets,
   persistBridgeResult as persistBridgeResultV4,
@@ -94,10 +92,6 @@ async function ensureBridge() {
   };
 }
 
-function buildAgentPayload(data) {
-  return buildAgentPayloadV4(data);
-}
-
 function buildPluginInstallHint() {
   return {
     status: 'plugin_required',
@@ -161,10 +155,41 @@ function buildAgentResult(extraction) {
       details: result && result.details ? result.details : null,
       extractedAt: result.extractedAt || null,
       returnedAt: result.returnedAt || null,
+      routingWarning: result.routingWarning || null,
       cacheDir,
     } : null,
-    agentPayload: result ? buildAgentPayload(result) : null,
+    agentPayloadWritten: !!cacheDir,
   };
+}
+
+function resolveFileKeyFromHealth(input, health) {
+  const target = parseTarget(input);
+  if (target && target.fileKey) {
+    return { fileKey: target.fileKey, ambiguous: false };
+  }
+  // Bare node-id: resolve from health
+  const connections = health && typeof health.pluginConnections === 'number' ? health.pluginConnections : 0;
+  const unregistered = health && typeof health.unregisteredConnections === 'number' ? health.unregisteredConnections : 0;
+  // pluginFileKeys is already deduplicated by server
+  const uniqueKeys = health && Array.isArray(health.pluginFileKeys) ? health.pluginFileKeys : [];
+
+  // If any connection hasn't registered a fileKey yet, we can't be sure of the routing
+  if (unregistered > 0 && connections > 1) {
+    return { fileKey: null, ambiguous: true, availableFileKeys: uniqueKeys, reason: `${unregistered} 个连接尚未注册 fileKey` };
+  }
+  // Exactly one unique fileKey across all connections — unambiguous
+  if (uniqueKeys.length === 1) {
+    return { fileKey: uniqueKeys[0], ambiguous: false };
+  }
+  // Multiple distinct fileKeys — ambiguous
+  if (uniqueKeys.length > 1) {
+    return { fileKey: null, ambiguous: true, availableFileKeys: uniqueKeys };
+  }
+  // No fileKeys registered at all
+  if (connections > 1) {
+    return { fileKey: null, ambiguous: true, availableFileKeys: [], reason: '多个连接均未注册 fileKey' };
+  }
+  return { fileKey: null, ambiguous: false };
 }
 
 async function runExtract(input) {
@@ -173,12 +198,30 @@ async function runExtract(input) {
     return ensured;
   }
 
+  const resolved = resolveFileKeyFromHealth(input, ensured.health);
+  if (resolved.ambiguous) {
+    const detail = resolved.reason
+      || `当前已连接的 fileKey: ${resolved.availableFileKeys.join(', ')}`;
+    return {
+      ok: false,
+      startedBridge: ensured.startedBridge,
+      health: ensured.health,
+      error: `裸 node-id 输入在多插件场景下无法消歧。${detail}。请传入完整 Figma URL。`,
+      errorCode: 'AMBIGUOUS_FILEKEY',
+    };
+  }
+
+  const bodyObj = { input };
+  if (resolved.fileKey) {
+    bodyObj.fileKey = resolved.fileKey;
+  }
+
   const response = await fetchJson(
     `${BRIDGE_BASE_URL}/extract-node-defs`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify(bodyObj),
     },
     EXTRACT_REQUEST_TIMEOUT_MS
   );
@@ -199,9 +242,22 @@ async function runAssetFetch(targetInput, imageHash) {
   const target = parseTarget(targetInput);
   if (!target) return { ok: false, error: '无法解析目标节点' };
 
+  const resolved = resolveFileKeyFromHealth(targetInput, ensured.health);
+  if (resolved.ambiguous) {
+    const detail = resolved.reason
+      || `当前已连接的 fileKey: ${resolved.availableFileKeys.join(', ')}`;
+    return {
+      ok: false,
+      error: `裸 node-id 输入在多插件场景下无法消歧。${detail}。请传入完整 Figma URL。`,
+      errorCode: 'AMBIGUOUS_FILEKEY',
+      target,
+    };
+  }
+  const effectiveFileKey = target.fileKey || resolved.fileKey;
+
   const cacheDir = path.join(
     CACHE_ROOT,
-    sanitizePathPart(target.fileKey || 'unknown-file'),
+    sanitizePathPart(effectiveFileKey || 'unknown-file'),
     sanitizePathPart(target.nodeId || 'unknown-node')
   );
   const assetsDir = path.join(cacheDir, 'assets');
@@ -214,7 +270,11 @@ async function runAssetFetch(targetInput, imageHash) {
     const response = await fetch(`${BRIDGE_BASE_URL}/extract-image-asset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: target.raw || targetInput, imageHash }),
+      body: JSON.stringify({
+        input: target.raw || targetInput,
+        imageHash,
+        fileKey: effectiveFileKey,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timer);

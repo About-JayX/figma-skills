@@ -7,5 +7,6 @@ export function createBridgeServerState({ host, port, startedAt }) {
     pendingJobs: new Map(),
     pendingChunks: new Map(),
     pendingAssets: new Map(),
+    pendingBlobs: new Map(),
   };
 }

@@ -135,18 +135,118 @@ export function buildMeta(data) {
   };
 }
 
+function attachBlobMetadataToNode(node, blobByNodeId) {
+  if (!node || typeof node !== 'object') {
+    return;
+  }
+
+  if (
+    node.svgRef &&
+    typeof node.svgRef === 'object' &&
+    typeof node.svgRef.nodeId === 'string' &&
+    blobByNodeId[node.svgRef.nodeId]
+  ) {
+    Object.assign(node.svgRef, blobByNodeId[node.svgRef.nodeId]);
+  }
+
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      attachBlobMetadataToNode(child, blobByNodeId);
+    }
+  }
+}
+
+function trimNodeTree(node, isRoot) {
+  if (!node || typeof node !== 'object') return node;
+  const out = Object.assign({}, node);
+  if (!isRoot) {
+    // Only root keeps svgString (used for baseline generation) and css;
+    // child svgStrings and css objects are heavy and unused by pipeline/cross-validation.
+    delete out.svgString;
+    delete out.css;
+  }
+  if (Array.isArray(out.children)) {
+    out.children = out.children.map((c) => trimNodeTree(c, false));
+  }
+  return out;
+}
+
+function trimDesignSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const trimmed = Object.assign({}, snapshot);
+  // Trim node tree: strip svgString from non-root nodes
+  if (trimmed.root) {
+    trimmed.root = trimNodeTree(trimmed.root, true);
+  }
+  // Strip heavy resources.imageAssets bytesBase64 (already materialized to disk)
+  if (trimmed.resources && typeof trimmed.resources === 'object') {
+    const res = Object.assign({}, trimmed.resources);
+    if (res.imageAssets && typeof res.imageAssets === 'object') {
+      const cleanAssets = {};
+      for (const [hash, asset] of Object.entries(res.imageAssets)) {
+        if (asset && typeof asset === 'object') {
+          const { bytesBase64, ...rest } = asset;
+          cleanAssets[hash] = rest;
+        } else {
+          cleanAssets[hash] = asset;
+        }
+      }
+      res.imageAssets = cleanAssets;
+    }
+    trimmed.resources = res;
+  }
+  return trimmed;
+}
+
+function trimRestSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  // Keep only structural metadata, drop full node trees to limit size
+  return {
+    available: true,
+    nodeCount: snapshot.document && snapshot.document.children
+      ? countNodes(snapshot.document)
+      : null,
+    name: snapshot.name || null,
+    lastModified: snapshot.lastModified || null,
+    version: snapshot.version || null,
+  };
+}
+
+function countNodes(node) {
+  if (!node) return 0;
+  let count = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      count += countNodes(child);
+    }
+  }
+  return count;
+}
+
 export function buildAgentPayload(data) {
   const defs = data && data.defs ? data.defs : {};
   return {
     meta: buildMeta(data),
     defs: {
       flat: defs.flat || {},
-      full: defs.full || null,
+      // defs.full omitted — it duplicates bridge-response.json and can be tens of MB
       summary: defs.summary || null,
       unresolvedAliasIds: Array.isArray(defs.unresolvedAliasIds) ? defs.unresolvedAliasIds : [],
     },
-    designSnapshot: data && data.designSnapshot ? data.designSnapshot : null,
-    restSnapshot: data && data.restSnapshot ? data.restSnapshot : null,
+    designSnapshot: trimDesignSnapshot(data && data.designSnapshot ? data.designSnapshot : null),
+    restSnapshot: trimRestSnapshot(data && data.restSnapshot ? data.restSnapshot : null),
+    sideChannelBlobs: Array.isArray(data && data.sideChannelBlobs)
+      ? data.sideChannelBlobs.map((blob) => ({
+          kind: blob && blob.kind ? blob.kind : 'blob',
+          blobId: blob && blob.blobId ? blob.blobId : null,
+          nodeId: blob && blob.nodeId ? blob.nodeId : null,
+          fileName: blob && blob.fileName ? blob.fileName : null,
+          relativePath: blob && blob.relativePath ? blob.relativePath : null,
+          localPath: blob && blob.localPath ? blob.localPath : null,
+          byteLength: blob && typeof blob.byteLength === 'number' ? blob.byteLength : null,
+          ext: blob && blob.ext ? blob.ext : null,
+        }))
+      : [],
     diagnostics: data && data.diagnostics ? data.diagnostics : null,
   };
 }
@@ -189,7 +289,9 @@ export function buildCacheManifest(data, cacheDir, assetFiles) {
         'inferredVariables',
         'resolvedVariableModes',
         'css',
+        'svgRef',
         'svgString',
+        'sideChannelBlobs',
         'restSnapshot',
         'imageAssets',
       ],
@@ -246,6 +348,57 @@ export function materializeEmbeddedImageAssets(data, cacheDir) {
   return assetFiles;
 }
 
+export function materializeSideChannelBlobs(data, cacheDir) {
+  const blobs = Array.isArray(data && data.sideChannelBlobs) ? data.sideChannelBlobs : [];
+  if (blobs.length === 0) {
+    return {};
+  }
+
+  const blobsDir = path.join(cacheDir, 'blobs');
+  fs.mkdirSync(blobsDir, { recursive: true });
+
+  const blobFiles = {};
+  const blobByNodeId = {};
+
+  for (const blob of blobs) {
+    if (!blob || typeof blob !== 'object' || typeof blob.localPath !== 'string' || !fs.existsSync(blob.localPath)) {
+      continue;
+    }
+
+    const fileName = blob.fileName || `${sanitizePathPart(blob.kind || 'blob')}-${sanitizePathPart(blob.nodeId || blob.blobId || 'unknown')}.${sanitizePathPart(blob.ext || 'bin')}`;
+    const destPath = path.join(blobsDir, fileName);
+    fs.renameSync(blob.localPath, destPath);
+
+    blob.fileName = fileName;
+    blob.localPath = destPath;
+    blob.relativePath = path.relative(cacheDir, destPath);
+
+    if (blob.nodeId) {
+      blobByNodeId[blob.nodeId] = {
+        fileName: blob.fileName,
+        localPath: blob.localPath,
+        relativePath: blob.relativePath,
+      };
+    }
+
+    blobFiles[blob.blobId || blob.nodeId || fileName] = {
+      kind: blob.kind || 'blob',
+      nodeId: blob.nodeId || null,
+      fileName: blob.fileName,
+      localPath: blob.localPath,
+      relativePath: blob.relativePath,
+      byteLength: typeof blob.byteLength === 'number' ? blob.byteLength : null,
+      ext: blob.ext || null,
+    };
+  }
+
+  if (data && data.designSnapshot && data.designSnapshot.root) {
+    attachBlobMetadataToNode(data.designSnapshot.root, blobByNodeId);
+  }
+
+  return blobFiles;
+}
+
 export function persistBridgeResult(result) {
   if (!result || result.ok === false || !result.target) {
     return null;
@@ -253,8 +406,18 @@ export function persistBridgeResult(result) {
 
   const cacheDir = ensureCacheDirForResult(result);
   const assetFiles = materializeEmbeddedImageAssets(result, cacheDir);
+  const blobFiles = materializeSideChannelBlobs(result, cacheDir);
+
+  // Write bridge-response first (largest), then build+write agent payload.
+  // Using streaming for both to avoid holding entire JSON strings in memory.
   writeJsonFileStreaming(path.join(cacheDir, 'bridge-response.json'), result);
-  writeJsonFile(path.join(cacheDir, 'bridge-agent-payload.json'), buildAgentPayload(result));
-  writeJsonFile(path.join(cacheDir, 'cache-manifest.json'), buildCacheManifest(result, cacheDir, assetFiles));
+
+  const agentPayload = buildAgentPayload(result);
+  writeJsonFileStreaming(path.join(cacheDir, 'bridge-agent-payload.json'), agentPayload);
+
+  writeJsonFile(
+    path.join(cacheDir, 'cache-manifest.json'),
+    buildCacheManifest(result, cacheDir, Object.assign({}, assetFiles, blobFiles))
+  );
   return cacheDir;
 }

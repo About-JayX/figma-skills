@@ -48,7 +48,8 @@ function bridgeExtract(url) {
 
   const agentResult = parseJson(run(`node ${SCRIPTS}/bridge_client.mjs agent "${url}"`));
   if (!agentResult?.ok) {
-    console.error('  ✗ 节点提取失败:', agentResult?.error || 'unknown');
+    const errCode = agentResult?.errorCode || agentResult?.bridge?.errorCode || '';
+    console.error(`  ✗ 节点提取失败${errCode ? ` [${errCode}]` : ''}: ${agentResult?.error || 'unknown'}`);
     return null;
   }
   console.log(`  ✓ 节点提取成功: ${agentResult.bridge?.node?.name || ''} (${agentResult.bridge?.diagnostics?.designSnapshot?.css?.attached || 0} CSS)`);
@@ -378,7 +379,6 @@ async function main() {
   }
 
   const cacheDir = agentResult.bridge?.cacheDir
-    || agentResult.agentPayload?.cacheDir
     || agentResult.cacheDir;
 
   if (!cacheDir) {
@@ -387,7 +387,7 @@ async function main() {
   }
 
   const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
-  const agentPayload = fs.existsSync(payloadPath)
+  let agentPayload = fs.existsSync(payloadPath)
     ? JSON.parse(fs.readFileSync(payloadPath, 'utf-8'))
     : null;
 
@@ -396,6 +396,7 @@ async function main() {
   const warnings = crossValidate(cacheDir, agentPayload);
   const baselinePath = generateBaseline(cacheDir, agentPayload);
   summary(agentResult, warnings, baselinePath);
+  agentPayload = null; // release for GC
 }
 
 main().catch(e => {

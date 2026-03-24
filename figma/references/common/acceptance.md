@@ -70,6 +70,16 @@ pixel diff ratio / SSIM / DeltaE00（p95 + max）/ baseline 与 candidate 来源
 
 ---
 
+## 性能 Hard Gate（违反 = 禁止继续验收）
+
+1. **region-first**: 必须先对修改区域做 `--crop` + `--mode region` 验收；只有 region 收敛后才允许 page 级全图验证
+2. **大图保护**: 任一 baseline/candidate 超过 25M 像素（如 2560×10000）时，**禁止**直接跑全图 scorecard，必须先 `--crop` 裁到目标 section
+3. **early-exit**: 当 pixel_diff_ratio 远超阈值时，必须加 `--early-exit` 跳过 SSIM/DeltaE00 全量计算；先缩小区域再做精细验收
+4. **并发限制**: 大图验收、rerender、baseline 生成禁止多 entry 并行；单次只允许一个重型验收任务运行
+5. **大对象读取限制**: 默认只读 `bridge-agent-payload.json`、`cross-validation-report.json`、`merge-summary.md`；除非排查具体字段 bug，禁止把 `bridge-response.json` 或完整 `restSnapshot` 整包加载到上下文
+
+---
+
 ## 自动验收流程
 
 **capture baseline → capture candidate → build manifest → run scorecard → generate plan → patch render plan → rerender failed → rerun → package bundle**

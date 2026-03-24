@@ -2,6 +2,7 @@ import type { BridgeCommandPayload, BridgeCommandType, UiStatusState } from './t
 
 interface BridgeConnectionOptions {
   eventsUrl: string;
+  originUrl: string;
   onBridgeStatus: (text: string, state: UiStatusState) => void;
   forwardBridgeCommand: (
     type: BridgeCommandType,
@@ -10,8 +11,41 @@ interface BridgeConnectionOptions {
 }
 
 export function createBridgeConnection(options: BridgeConnectionOptions) {
-  const { eventsUrl, onBridgeStatus, forwardBridgeCommand } = options;
+  const { eventsUrl, originUrl, onBridgeStatus, forwardBridgeCommand } = options;
   let eventSource: EventSource | null = null;
+  let currentClientId: string | null = null;
+  let currentFileKey: string | null = null;
+  let currentDocumentName: string | null = null;
+
+  function doRegister(clientId: string, fileKey: string | null, documentName: string | null): void {
+    const body: Record<string, unknown> = { clientId, fileKey };
+    if (documentName) { body.documentName = documentName; }
+    fetch(originUrl + '/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => {
+      if (res.ok) {
+        const label = fileKey || documentName || '(unknown)';
+        onBridgeStatus('Bridge SSE 已连接 (fileKey: ' + label + ')', 'ok');
+      }
+    }).catch(() => {
+      // registration is best-effort
+    });
+  }
+
+  function tryRegister(): void {
+    if (currentClientId && (currentFileKey || currentDocumentName)) {
+      doRegister(currentClientId, currentFileKey, currentDocumentName);
+    }
+  }
+
+  /** Called by main when plugin sends filekey-info. */
+  function registerFileKey(fileKey: string | null, documentName?: string | null): void {
+    currentFileKey = fileKey;
+    if (documentName !== undefined) { currentDocumentName = documentName; }
+    tryRegister();
+  }
 
   function handleBridgeJob(
     eventName: string,
@@ -37,11 +71,22 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
       eventSource.close();
     }
 
+    currentClientId = null;
     onBridgeStatus('Bridge SSE 连接中...', 'loading');
     eventSource = new EventSource(eventsUrl);
 
-    eventSource.addEventListener('ready', () => {
+    eventSource.addEventListener('ready', (event) => {
       onBridgeStatus('Bridge SSE 已连接', 'ok');
+      try {
+        const data = JSON.parse((event as MessageEvent<string>).data || '{}');
+        if (data.clientId) {
+          currentClientId = data.clientId;
+          // Auto-register if fileKey already known (covers reconnect & early filekey-info)
+          tryRegister();
+        }
+      } catch {
+        // ready event data parse failure is non-fatal
+      }
     });
 
     eventSource.addEventListener('extract-node-defs', (event) => {
@@ -62,6 +107,9 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
 
     eventSource.onerror = () => {
       onBridgeStatus('Bridge SSE 已断开，等待重连...', 'error');
+      // EventSource auto-reconnects; on next ready event, currentClientId will update
+      // and tryRegister() will fire with the cached currentFileKey.
+      currentClientId = null;
     };
   }
 
@@ -70,6 +118,7 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
       eventSource.close();
       eventSource = null;
     }
+    currentClientId = null;
   }
 
   function reconnect(): void {
@@ -80,5 +129,6 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
     connect,
     disconnect,
     reconnect,
+    registerFileKey,
   };
 }

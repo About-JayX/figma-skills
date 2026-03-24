@@ -4,6 +4,7 @@ import { handleExtractImageAssetRequest } from './routes/extract_image_asset.mjs
 import { handleExtractNodeDefsRequest } from './routes/extract_node_defs.mjs';
 import { handleHealthRequest } from './routes/health.mjs';
 import { handleJobAssetRequest } from './routes/job_asset.mjs';
+import { handleJobBlobRequest } from './routes/job_blob.mjs';
 import { handleJobResultRequest } from './routes/job_result.mjs';
 
 export function createBridgeServerRequestHandler(state) {
@@ -38,13 +39,15 @@ export function createBridgeServerRequestHandler(state) {
       }
       const clientId = body && typeof body.clientId === 'string' ? body.clientId : '';
       const fileKey = body && typeof body.fileKey === 'string' ? body.fileKey : null;
+      const documentName = body && typeof body.documentName === 'string' ? body.documentName : null;
       const client = state.pluginClients.get(clientId);
       if (!client) {
         writeJson(res, 404, { ok: false, error: '未找到该 clientId', errorCode: 'CLIENT_NOT_FOUND' });
         return;
       }
       client.fileKey = fileKey || null;
-      writeJson(res, 200, { ok: true, clientId, fileKey: client.fileKey });
+      if (documentName) { client.documentName = documentName; }
+      writeJson(res, 200, { ok: true, clientId, fileKey: client.fileKey, documentName: client.documentName || null });
       return;
     }
 
@@ -76,6 +79,17 @@ export function createBridgeServerRequestHandler(state) {
         req,
         res,
         decodeURIComponent(assetMatch[1])
+      );
+      return;
+    }
+
+    const blobMatch = url.pathname.match(/^\/jobs\/([^/]+)\/blob$/);
+    if ((req.method === 'PUT' || req.method === 'POST') && blobMatch) {
+      await handleJobBlobRequest(
+        state,
+        req,
+        res,
+        decodeURIComponent(blobMatch[1])
       );
       return;
     }

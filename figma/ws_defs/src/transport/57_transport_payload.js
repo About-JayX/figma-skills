@@ -74,10 +74,8 @@ async function postJobResult(jobId, payload, reportStage) {
 
   var limits = getResultTransportLimits();
   var transportPayload = trimPayloadForTransport(payload);
-  var encoded = encodeJsonUtf8(transportPayload);
-  var body = encoded.json;
+  var encoded = encodeJsonUtf8Lazy(transportPayload);
   var payloadBytes = encoded.byteLength;
-  var bodyBytes = encoded.bytes;
 
   if (reportStage) {
     reportStage.ok('transport.serialize.done', '结果序列化完成', {
@@ -94,10 +92,15 @@ async function postJobResult(jobId, payload, reportStage) {
   }
 
   if (payloadBytes > limits.maxTotalBytes) {
+    var payloadBreakdown = buildPayloadSizeDiagnostics(transportPayload);
     throw createPluginError(
       'RESULT_PAYLOAD_TOO_LARGE',
       '结果字节超出上限: ' + payloadBytes + ' > ' + limits.maxTotalBytes,
-      { payloadBytes: payloadBytes, maxTotalBytes: limits.maxTotalBytes }
+      {
+        payloadBytes: payloadBytes,
+        maxTotalBytes: limits.maxTotalBytes,
+        payloadBreakdown: payloadBreakdown,
+      }
     );
   }
 
@@ -113,7 +116,7 @@ async function postJobResult(jobId, payload, reportStage) {
     var response = await fetch(resultUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: body,
+      body: encoded.json,
     });
     var result = await response.json();
 
@@ -149,6 +152,7 @@ async function postJobResult(jobId, payload, reportStage) {
     });
   }
 
+  var bodyBytes = encoded.bytes;
   for (var i = 0; i < totalChunks; i += 1) {
     var start = i * limits.chunkSizeBytes;
     var end = Math.min(start + limits.chunkSizeBytes, bodyBytes.length);

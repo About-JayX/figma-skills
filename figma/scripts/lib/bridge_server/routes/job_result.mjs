@@ -8,9 +8,10 @@ import {
   writeJson,
 } from '../../bridge_http.mjs';
 import { appendJobResultChunk } from '../chunk_store.mjs';
+import { getPendingBlobs } from '../blob_store.mjs';
 import { getPendingJob } from '../job_store.mjs';
 
-function normalizeJobResult(job, payload) {
+function normalizeJobResult(state, job, payload) {
   const result =
     payload && typeof payload === 'object'
       ? Object.assign({}, payload)
@@ -27,6 +28,10 @@ function normalizeJobResult(job, payload) {
   }
   if (!result.target.url && result.figmaUrl) {
     result.target.url = result.figmaUrl;
+  }
+  const pendingBlobs = getPendingBlobs(state, job.jobId);
+  if (pendingBlobs.length > 0) {
+    result.sideChannelBlobs = pendingBlobs.map((blob) => Object.assign({}, blob));
   }
   result.returnedAt = new Date().toISOString();
   return result;
@@ -108,7 +113,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
       return;
     }
 
-    job.resolve(normalizeJobResult(job, payload));
+    job.resolve(normalizeJobResult(state, job, payload));
 
     writeJson(res, 200, {
       ok: true,
@@ -135,7 +140,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     return;
   }
 
-  job.resolve(normalizeJobResult(job, payload));
+  job.resolve(normalizeJobResult(state, job, payload));
 
   writeJson(res, 200, {
     ok: true,

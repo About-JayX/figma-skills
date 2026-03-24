@@ -3,8 +3,8 @@ async function handleExtractNodeDefs(command) {
   const jobId = command && command.jobId ? command.jobId : '';
   const extractionOptions =
     command && command.options && typeof command.options === 'object'
-      ? command.options
-      : null;
+      ? Object.assign({ jobId: jobId }, command.options)
+      : { jobId: jobId };
   const reportStage = createJobStatusReporter(jobId, command);
 
   if (!jobId) {
@@ -15,11 +15,12 @@ async function handleExtractNodeDefs(command) {
     throw createPluginError('INVALID_TARGET', '缺少 nodeId');
   }
 
+  var effectiveIncludeInvisible = extractionOptions && typeof extractionOptions.includeInvisibleInstanceChildren === 'boolean'
+    ? extractionOptions.includeInvisibleInstanceChildren
+    : DEFAULT_EXTRACTION_OPTIONS.includeInvisibleInstanceChildren;
   reportStage.loading('job.start', 'job ' + jobId + ' 启动', {
     nodeId: target && target.nodeId ? target.nodeId : null,
-    includeInvisibleInstanceChildren: !!(
-      extractionOptions && extractionOptions.includeInvisibleInstanceChildren === true
-    ),
+    includeInvisibleInstanceChildren: effectiveIncludeInvisible,
   });
 
   reportStage.loading('job.resolve-node.start', '定位目标节点中', {
@@ -57,10 +58,11 @@ async function handleExtractNodeDefs(command) {
       resolvedFileKey = figma.fileKey;
     }
   } catch (_) {}
-  var figmaUrl = null;
-  if (resolvedFileKey && target.nodeId) {
-    figmaUrl = 'https://www.figma.com/design/' + resolvedFileKey + '/?node-id=' + encodeURIComponent(target.nodeId);
-  }
+  // Always generate a figmaUrl; use DRAFT placeholder when fileKey is unavailable
+  var urlFileKey = resolvedFileKey || 'DRAFT';
+  var figmaUrl = target.nodeId
+    ? 'https://www.figma.com/design/' + urlFileKey + '/?node-id=' + encodeURIComponent(target.nodeId)
+    : null;
   const payload = {
     ok: true,
     jobId: jobId,

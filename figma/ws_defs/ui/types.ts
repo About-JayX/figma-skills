@@ -22,9 +22,16 @@ export interface NodeIdResultPluginMessage {
   type: 'node-id-result';
   ids: string[];
   fileKey: string | null;
+  documentName?: string | null;
 }
 
-export type PluginMessage = StatusPluginMessage | NodeIdResultPluginMessage;
+export interface FileKeyInfoPluginMessage {
+  type: 'filekey-info';
+  fileKey: string | null;
+  documentName?: string | null;
+}
+
+export type PluginMessage = StatusPluginMessage | NodeIdResultPluginMessage | FileKeyInfoPluginMessage;
 
 export type BridgeCommandType = 'extract-node-defs' | 'extract-image-asset';
 

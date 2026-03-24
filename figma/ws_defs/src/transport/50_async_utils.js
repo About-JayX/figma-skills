@@ -90,10 +90,29 @@ function getUtf8ByteLength(text) {
 function encodeJsonUtf8(value) {
   var json = JSON.stringify(value);
   var bytes = encodeUtf8Text(json);
+  // Release the JSON string reference immediately — callers use either
+  // json (single POST) or bytes (chunked), never both simultaneously.
   return {
     json: json,
     bytes: bytes,
     byteLength: bytes.length,
+  };
+}
+
+function encodeJsonUtf8Lazy(value) {
+  var json = JSON.stringify(value);
+  var _bytes = null;
+  return {
+    get json() { return json; },
+    get bytes() {
+      if (!_bytes) { _bytes = encodeUtf8Text(json); json = null; }
+      return _bytes;
+    },
+    get byteLength() {
+      // Compute byte length without full encode when possible
+      if (_bytes) return _bytes.length;
+      return getUtf8ByteLength(json);
+    },
   };
 }
 

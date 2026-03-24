@@ -9,13 +9,27 @@ function parseChunkHeader(value) {
   return Number.isInteger(parsed) ? parsed : null;
 }
 
-export function appendJobResultChunk(
-  state,
-  jobId,
-  chunkIndexHeader,
-  chunkTotalHeader,
-  rawBody
-) {
+export function appendChunkedBody(state, key, chunkIndexHeader, chunkTotalHeader, rawBody, limits) {
+  const normalized = Object.assign(
+    {
+      maxChunkBytes: RESULT_CHUNK_MAX_BYTES,
+      maxChunkCount: RESULT_CHUNK_MAX_COUNT,
+      maxTotalBytes: RESULT_CHUNK_MAX_TOTAL_BYTES,
+      invalidHeadersCode: 'INVALID_CHUNK_HEADERS',
+      chunkCountExceededCode: 'RESULT_CHUNK_COUNT_EXCEEDED',
+      chunkTooLargeCode: 'RESULT_CHUNK_TOO_LARGE',
+      totalTooLargeCode: 'RESULT_CHUNK_TOTAL_TOO_LARGE',
+      chunkTotalMismatchCode: 'CHUNK_TOTAL_MISMATCH',
+      missingChunkCode: 'MISSING_CHUNK',
+      invalidHeadersMessage: '分块头不合法',
+      chunkCountExceededMessage: '结果分块数超出上限',
+      chunkTooLargeMessage: '结果单块超出上限',
+      totalTooLargeMessage: '结果累计字节超出上限',
+      chunkTotalMismatchMessage: '分块总数不一致',
+      missingChunkMessage: '分块不完整',
+    },
+    limits || {}
+  );
   const chunkIndex = parseChunkHeader(chunkIndexHeader);
   const chunkTotal = parseChunkHeader(chunkTotalHeader);
 
@@ -29,46 +43,46 @@ export function appendJobResultChunk(
     return {
       ok: false,
       statusCode: 400,
-      error: '分块头不合法',
-      errorCode: 'INVALID_CHUNK_HEADERS',
+      error: normalized.invalidHeadersMessage,
+      errorCode: normalized.invalidHeadersCode,
     };
   }
 
-  if (chunkTotal > RESULT_CHUNK_MAX_COUNT) {
+  if (chunkTotal > normalized.maxChunkCount) {
     return {
       ok: false,
       statusCode: 413,
-      error: '结果分块数超出上限',
-      errorCode: 'RESULT_CHUNK_COUNT_EXCEEDED',
+      error: normalized.chunkCountExceededMessage,
+      errorCode: normalized.chunkCountExceededCode,
     };
   }
 
-  if (rawBody.length > RESULT_CHUNK_MAX_BYTES) {
+  if (rawBody.length > normalized.maxChunkBytes) {
     return {
       ok: false,
       statusCode: 413,
-      error: '结果单块超出上限',
-      errorCode: 'RESULT_CHUNK_TOO_LARGE',
+      error: normalized.chunkTooLargeMessage,
+      errorCode: normalized.chunkTooLargeCode,
     };
   }
 
-  let entry = state.pendingChunks.get(jobId);
+  let entry = state.pendingChunks.get(key);
   if (!entry) {
     entry = {
       total: chunkTotal,
       totalBytes: 0,
       received: new Map(),
     };
-    state.pendingChunks.set(jobId, entry);
+    state.pendingChunks.set(key, entry);
   }
 
   if (entry.total !== chunkTotal) {
-    state.pendingChunks.delete(jobId);
+    state.pendingChunks.delete(key);
     return {
       ok: false,
       statusCode: 409,
-      error: '分块总数不一致',
-      errorCode: 'CHUNK_TOTAL_MISMATCH',
+      error: normalized.chunkTotalMismatchMessage,
+      errorCode: normalized.chunkTotalMismatchCode,
     };
   }
 
@@ -80,13 +94,13 @@ export function appendJobResultChunk(
   entry.received.set(chunkIndex, rawBody);
   entry.totalBytes += rawBody.length;
 
-  if (entry.totalBytes > RESULT_CHUNK_MAX_TOTAL_BYTES) {
-    state.pendingChunks.delete(jobId);
+  if (entry.totalBytes > normalized.maxTotalBytes) {
+    state.pendingChunks.delete(key);
     return {
       ok: false,
       statusCode: 413,
-      error: '结果累计字节超出上限',
-      errorCode: 'RESULT_CHUNK_TOTAL_TOO_LARGE',
+      error: normalized.totalTooLargeMessage,
+      errorCode: normalized.totalTooLargeCode,
     };
   }
 
@@ -106,16 +120,16 @@ export function appendJobResultChunk(
     if (!part) {
       state.pendingChunks.delete(jobId);
       return {
-        ok: false,
-        statusCode: 400,
-        error: '分块不完整',
-        errorCode: 'MISSING_CHUNK',
-      };
-    }
+      ok: false,
+      statusCode: 400,
+      error: normalized.missingChunkMessage,
+      errorCode: normalized.missingChunkCode,
+    };
+  }
     parts.push(part);
   }
 
-  state.pendingChunks.delete(jobId);
+  state.pendingChunks.delete(key);
 
   return {
     ok: true,
@@ -123,4 +137,14 @@ export function appendJobResultChunk(
     totalChunks: chunkTotal,
     body: Buffer.concat(parts),
   };
+}
+
+export function appendJobResultChunk(
+  state,
+  jobId,
+  chunkIndexHeader,
+  chunkTotalHeader,
+  rawBody
+) {
+  return appendChunkedBody(state, jobId, chunkIndexHeader, chunkTotalHeader, rawBody);
 }

@@ -13,6 +13,7 @@ function clearJobState(state, jobId, timeout) {
   state.pendingJobs.delete(jobId);
   state.pendingChunks.delete(jobId);
   state.pendingAssets.delete(jobId);
+  state.pendingBlobs.delete(jobId);
 }
 
 export function createPendingJob(state, { target, clientId }) {
@@ -74,15 +75,19 @@ export function getPendingJob(state, jobId) {
 
 export function getPrimaryPluginClient(state, fileKey) {
   const clients = Array.from(state.pluginClients.values());
-  if (!clients.length) return null;
+  if (!clients.length) return { client: null, ambiguous: false, mismatch: false };
 
   if (fileKey) {
     const matched = clients.filter((c) => c.fileKey === fileKey);
-    if (matched.length > 0) return matched[matched.length - 1];
+    if (matched.length > 0) return { client: matched[matched.length - 1], ambiguous: false, mismatch: false };
+    return { client: null, ambiguous: false, mismatch: true };
   }
 
-  // Fallback: last connected client (single-client backward compat)
-  return clients[clients.length - 1];
+  // No fileKey: single client is unambiguous; multiple clients is ambiguous — reject
+  if (clients.length === 1) {
+    return { client: clients[0], ambiguous: false, mismatch: false };
+  }
+  return { client: null, ambiguous: true, mismatch: false };
 }
 
 export function attachAssetWaiter(job) {

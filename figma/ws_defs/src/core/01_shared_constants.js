@@ -19,6 +19,7 @@ const DEFAULT_EXTRACTION_OPTIONS = {
   includeInvisibleInstanceChildren: true,
   restTimeoutMs: 5000,
   restMaxBytes: 3000000,
+  uploadSvgBlobs: true,
 };
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';

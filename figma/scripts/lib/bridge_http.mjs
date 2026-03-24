@@ -118,15 +118,85 @@ export function writeJsonFile(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-export function writeJsonFileStreaming(file, data) {
-  const json = JSON.stringify(data, null, 2);
-  const fd = fs.openSync(file, 'w');
+function writeJsonLeaf(fd, value, indent) {
+  const json = JSON.stringify(value, null, 2);
+  // JSON.stringify returns undefined for undefined/functions/symbols — emit null
+  if (json === undefined) {
+    fs.writeSync(fd, 'null');
+    return;
+  }
+  if (!json.includes('\n')) {
+    fs.writeSync(fd, json);
+    return;
+  }
+  const lines = json.split('\n');
+  fs.writeSync(fd, lines[0] + '\n');
+  for (let i = 1; i < lines.length; i++) {
+    fs.writeSync(fd, indent + lines[i]);
+    if (i < lines.length - 1) fs.writeSync(fd, '\n');
+  }
+}
 
-  try {
-    const chunkSize = 4 * 1024 * 1024;
-    for (let offset = 0; offset < json.length; offset += chunkSize) {
-      fs.writeSync(fd, json.slice(offset, offset + chunkSize));
+function writeJsonValue(fd, value, indent, depth) {
+  if (depth > 0 && value && typeof value === 'object') {
+    if (Array.isArray(value)) {
+      writeJsonArrayPerElement(fd, value, indent, depth - 1);
+    } else {
+      writeJsonObjectPerKey(fd, value, indent, depth - 1);
     }
+  } else {
+    writeJsonLeaf(fd, value, indent);
+  }
+}
+
+function writeJsonArrayPerElement(fd, arr, indent, depth) {
+  if (arr.length === 0) { fs.writeSync(fd, '[]'); return; }
+  fs.writeSync(fd, '[\n');
+  for (let i = 0; i < arr.length; i++) {
+    fs.writeSync(fd, indent + '  ');
+    writeJsonValue(fd, arr[i], indent + '  ', depth);
+    if (i < arr.length - 1) fs.writeSync(fd, ',');
+    fs.writeSync(fd, '\n');
+  }
+  fs.writeSync(fd, indent + ']');
+}
+
+function writeJsonObjectPerKey(fd, obj, indent, depth) {
+  // Filter out undefined values to match JSON.stringify behavior
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined);
+  if (keys.length === 0) { fs.writeSync(fd, '{}'); return; }
+  fs.writeSync(fd, '{\n');
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    fs.writeSync(fd, indent + '  ' + JSON.stringify(key) + ': ');
+    writeJsonValue(fd, obj[key], indent + '  ', depth);
+    if (i < keys.length - 1) fs.writeSync(fd, ',');
+    fs.writeSync(fd, '\n');
+  }
+  fs.writeSync(fd, indent + '}');
+}
+
+// Maximum nesting depth for per-key streaming serialization.
+// Level 0 = top-level keys; level 1 = sub-keys (e.g. designSnapshot.root);
+// level 2 = sub-sub-keys (e.g. designSnapshot.root.children is an array → leaf).
+const STREAMING_DEPTH = 2;
+
+export function writeJsonFileStreaming(file, data) {
+  // Serialize and write per-key at multiple nesting levels to avoid building
+  // large sub-trees as single JSON strings in memory.
+  const fd = fs.openSync(file, 'w');
+  try {
+    const keys = Object.keys(data);
+    fs.writeSync(fd, '{\n');
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const val = data[key];
+      fs.writeSync(fd, '  ' + JSON.stringify(key) + ': ');
+      writeJsonValue(fd, val, '  ', STREAMING_DEPTH);
+      if (i < keys.length - 1) fs.writeSync(fd, ',');
+      fs.writeSync(fd, '\n');
+    }
+    fs.writeSync(fd, '}\n');
   } finally {
     fs.closeSync(fd);
   }

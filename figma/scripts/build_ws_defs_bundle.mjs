@@ -49,6 +49,8 @@ const MODULE_PATHS = [
   'src/transport/54_rest_snapshot.js',
   'src/transport/55_design_snapshot.js',
   'src/transport/56_node_extraction.js',
+  'src/transport/56a_payload_diagnostics.js',
+  'src/transport/57a_post_job_blob.js',
   'src/transport/57_transport_payload.js',
   'src/transport/58_post_job_asset.js',
   'src/transport/59_plugin_error.js',

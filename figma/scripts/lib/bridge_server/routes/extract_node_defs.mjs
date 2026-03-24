@@ -36,7 +36,29 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
     return;
   }
 
-  const pluginClient = getPrimaryPluginClient(state, target.fileKey);
+  // Allow caller to provide fileKey explicitly for bare node-id inputs
+  const effectiveFileKey = target.fileKey
+    || (body && typeof body.fileKey === 'string' ? body.fileKey : null);
+
+  const { client: pluginClient, ambiguous, mismatch } = getPrimaryPluginClient(state, effectiveFileKey);
+  if (mismatch) {
+    writeJson(res, 409, {
+      ok: false,
+      target,
+      error: `没有匹配 fileKey "${effectiveFileKey}" 的插件连接。当前连接的 fileKey: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(未注册)').join(', ')}`,
+      errorCode: 'FILEKEY_MISMATCH',
+    });
+    return;
+  }
+  if (ambiguous) {
+    writeJson(res, 409, {
+      ok: false,
+      target,
+      error: `多插件场景下无 fileKey，无法确定路由。当前连接的 fileKey: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(未注册)').join(', ')}。请传 Figma URL 或 body.fileKey。`,
+      errorCode: 'AMBIGUOUS_ROUTING',
+    });
+    return;
+  }
   if (!pluginClient) {
     writeJson(res, 409, {
       ok: false,

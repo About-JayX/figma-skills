@@ -83,6 +83,12 @@ export const ASSET_MAX_BYTES = parsePositiveInteger(
   'FIGMA_BRIDGE_ASSET_MAX_BYTES'
 );
 
+export const BLOB_MAX_BYTES = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_BLOB_MAX_BYTES,
+  128 * 1024 * 1024,
+  'FIGMA_BRIDGE_BLOB_MAX_BYTES'
+);
+
 export const JSON_BODY_MAX_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_JSON_BODY_MAX_BYTES,
   32 * 1024 * 1024,
@@ -113,6 +119,18 @@ export const RESULT_CHUNK_MAX_COUNT = parsePositiveInteger(
   'FIGMA_BRIDGE_RESULT_CHUNK_MAX_COUNT'
 );
 
+export const BLOB_CHUNK_MAX_TOTAL_BYTES = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_BLOB_CHUNK_MAX_TOTAL_BYTES,
+  BLOB_MAX_BYTES,
+  'FIGMA_BRIDGE_BLOB_CHUNK_MAX_TOTAL_BYTES'
+);
+
+export const BLOB_CHUNK_MAX_COUNT = parsePositiveInteger(
+  process.env.FIGMA_BRIDGE_BLOB_CHUNK_MAX_COUNT,
+  Math.ceil(BLOB_CHUNK_MAX_TOTAL_BYTES / RESULT_CHUNK_SIZE_BYTES),
+  'FIGMA_BRIDGE_BLOB_CHUNK_MAX_COUNT'
+);
+
 export function getBridgeRuntimeConfig() {
   return {
     bindHost: BRIDGE_BIND_HOST,
@@ -127,6 +145,12 @@ export function getBridgeRuntimeConfig() {
       maxChunkBytes: RESULT_CHUNK_MAX_BYTES,
       maxTotalBytes: RESULT_CHUNK_MAX_TOTAL_BYTES,
       maxChunkCount: RESULT_CHUNK_MAX_COUNT,
+    },
+    blobTransport: {
+      chunkSizeBytes: RESULT_CHUNK_SIZE_BYTES,
+      maxChunkBytes: RESULT_CHUNK_MAX_BYTES,
+      maxTotalBytes: BLOB_CHUNK_MAX_TOTAL_BYTES,
+      maxChunkCount: BLOB_CHUNK_MAX_COUNT,
     },
   };
 }

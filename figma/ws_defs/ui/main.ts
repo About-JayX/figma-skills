@@ -12,6 +12,7 @@ function boot(): void {
 
   const bridge = createBridgeConnection({
     eventsUrl: config.eventsUrl,
+    originUrl: config.origin,
     onBridgeStatus: dom.setBridgeStatus,
     forwardBridgeCommand,
   });
@@ -42,6 +43,13 @@ function boot(): void {
 
     if (msg.type === 'node-id-result') {
       dom.renderNodeIdResult(msg.ids, msg.fileKey);
+    }
+
+    if (msg.type === 'filekey-info') {
+      const label = msg.fileKey || msg.documentName || '(unknown)';
+      dom.appendLog('fileKey: ' + label);
+      // Register with bridge regardless of timing — bridge_sse holds clientId
+      bridge.registerFileKey(msg.fileKey, msg.documentName ?? null);
     }
   });
 
