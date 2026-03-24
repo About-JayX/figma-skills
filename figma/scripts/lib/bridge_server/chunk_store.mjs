@@ -121,6 +121,6 @@ export function appendJobResultChunk(
     ok: true,
     complete: true,
     totalChunks: chunkTotal,
-    body: Buffer.concat(parts).toString('utf8'),
+    body: Buffer.concat(parts),
   };
 }

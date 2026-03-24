@@ -85,7 +85,7 @@ export const ASSET_MAX_BYTES = parsePositiveInteger(
 
 export const JSON_BODY_MAX_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_JSON_BODY_MAX_BYTES,
-  128 * 1024 * 1024,
+  32 * 1024 * 1024,
   'FIGMA_BRIDGE_JSON_BODY_MAX_BYTES'
 );
 
@@ -103,7 +103,7 @@ export const RESULT_CHUNK_MAX_BYTES = parsePositiveInteger(
 
 export const RESULT_CHUNK_MAX_TOTAL_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES,
-  24 * 1024 * 1024,
+  50 * 1024 * 1024,
   'FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES'
 );
 

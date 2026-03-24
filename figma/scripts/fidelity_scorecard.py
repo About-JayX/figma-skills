@@ -17,6 +17,7 @@ The script prefers deterministic behavior over convenience:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -92,6 +93,16 @@ def parse_args() -> argparse.Namespace:
         "--fail-on-thresholds",
         action="store_true",
         help="Exit with code 1 when any threshold fails",
+    )
+    parser.add_argument(
+        "--crop",
+        default=None,
+        help="Crop region as x,y,w,h (pixels) applied to both images before comparison",
+    )
+    parser.add_argument(
+        "--early-exit",
+        action="store_true",
+        help="Skip expensive metrics (SSIM, DeltaE00) when pixel_diff already far exceeds threshold",
     )
     return parser.parse_args()
 
@@ -395,6 +406,15 @@ def evaluate_thresholds(mode: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def _parse_crop(crop_str: str | None) -> tuple[int, int, int, int] | None:
+    if not crop_str:
+        return None
+    parts = [int(v) for v in crop_str.split(",")]
+    if len(parts) != 4:
+        raise ValueError(f"--crop expects x,y,w,h but got {crop_str!r}")
+    return (parts[0], parts[1], parts[2], parts[3])
+
+
 def generate_report(
     *,
     baseline_path: Path,
@@ -405,6 +425,8 @@ def generate_report(
     heatmap_path: Path | None = None,
     lpips: bool = False,
     max_color_samples: int = 250000,
+    crop: str | None = None,
+    early_exit: bool = False,
 ) -> Dict[str, Any]:
     baseline_path = baseline_path.expanduser().resolve()
     candidate_path = candidate_path.expanduser().resolve()
@@ -413,17 +435,45 @@ def generate_report(
     if heatmap_path is None:
         heatmap_path = report_path.with_suffix(".heatmap.png")
 
-    baseline = load_rgba(baseline_path)
-    candidate = load_rgba(candidate_path)
-    baseline, candidate, canvas_meta = pad_to_same_canvas(baseline, candidate)
+    crop_rect = _parse_crop(crop)
 
-    baseline_rgb = rgba_to_rgb_float(baseline)
-    candidate_rgb = rgba_to_rgb_float(candidate)
+    raw_baseline = load_rgba(baseline_path)
+    raw_candidate = load_rgba(candidate_path)
 
+    if crop_rect:
+        x, y, w, h = crop_rect
+        raw_baseline = raw_baseline[y:y+h, x:x+w].copy()
+        raw_candidate = raw_candidate[y:y+h, x:x+w].copy()
+
+    baseline, candidate, canvas_meta = pad_to_same_canvas(raw_baseline, raw_candidate)
+    del raw_baseline, raw_candidate
+    gc.collect()
+
+    if crop_rect:
+        canvas_meta["crop"] = {"x": crop_rect[0], "y": crop_rect[1], "w": crop_rect[2], "h": crop_rect[3]}
+
+    # pixel diff uses uint8 directly - no float32 needed
     pixel_diff_ratio, diff, different = compute_pixel_diff_ratio(baseline, candidate, pixel_threshold)
-    ssim = compute_ssim(baseline_rgb, candidate_rgb)
-    delta_e00 = compute_delta_e_metrics(baseline_rgb, candidate_rgb, max_color_samples)
-    lpips_result = maybe_compute_lpips(lpips, baseline_rgb, candidate_rgb)
+
+    preset = PRESETS[mode]
+    skipped_expensive = early_exit and pixel_diff_ratio > preset["pixel_diff_ratio_max"] * 5
+
+    if skipped_expensive:
+        ssim = 0.0
+        delta_e00: Dict[str, Any] = {"skipped": True, "reason": "pixel_diff_ratio far exceeds threshold"}
+        lpips_result = None
+    else:
+        # convert to float32 only when needed, then free uint8 padded arrays
+        baseline_rgb = rgba_to_rgb_float(baseline)
+        candidate_rgb = rgba_to_rgb_float(candidate)
+        del baseline, candidate
+        gc.collect()
+
+        ssim = compute_ssim(baseline_rgb, candidate_rgb)
+        delta_e00 = compute_delta_e_metrics(baseline_rgb, candidate_rgb, max_color_samples)
+        lpips_result = maybe_compute_lpips(lpips, baseline_rgb, candidate_rgb)
+        del baseline_rgb, candidate_rgb
+        gc.collect()
 
     metrics: Dict[str, Any] = {
         "pixel_threshold": int(pixel_threshold),
@@ -434,7 +484,19 @@ def generate_report(
     if lpips_result is not None:
         metrics["lpips"] = lpips_result
 
-    thresholds = evaluate_thresholds(mode, metrics)
+    thresholds = evaluate_thresholds(mode, metrics) if not skipped_expensive else {
+        "mode": mode,
+        "checks": {
+            "pixel_diff_ratio": {
+                "actual": float(pixel_diff_ratio),
+                "operator": "<=",
+                "target": float(preset["pixel_diff_ratio_max"]),
+                "passed": False,
+            },
+        },
+        "passed": False,
+        "early_exit": True,
+    }
     heatmap_path.parent.mkdir(parents=True, exist_ok=True)
     save_heatmap(diff, heatmap_path)
 
@@ -473,6 +535,8 @@ def main() -> int:
         heatmap_path=Path(args.heatmap).expanduser().resolve() if args.heatmap else None,
         lpips=args.lpips,
         max_color_samples=args.max_color_samples,
+        crop=args.crop,
+        early_exit=args.early_exit,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.fail_on_thresholds and not report["thresholds"]["passed"]:

@@ -26,7 +26,7 @@ const SKILL_ROOT = path.resolve(__dirname, '..');
 
 function run(cmd, opts = {}) {
   try {
-    return execSync(cmd, { encoding: 'utf-8', timeout: 180000, maxBuffer: 200 * 1024 * 1024, cwd: path.resolve(SKILL_ROOT, '../..'), ...opts }).trim();
+    return execSync(cmd, { encoding: 'utf-8', timeout: 180000, maxBuffer: 50 * 1024 * 1024, cwd: path.resolve(SKILL_ROOT, '../..'), ...opts }).trim();
   } catch (e) {
     return null;
   }
@@ -56,11 +56,9 @@ function bridgeExtract(url) {
 }
 
 // === Step 1.5: Fetch deferred image assets ===
-function fetchDeferredAssets(url, cacheDir) {
-  const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
-  if (!fs.existsSync(payloadPath)) return;
+function fetchDeferredAssets(url, data) {
+  if (!data) return;
 
-  const data = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
   const imageAssets = data?.designSnapshot?.resources?.imageAssets;
   if (!imageAssets || typeof imageAssets !== 'object') return;
 
@@ -99,16 +97,14 @@ function mergeCache(url) {
 }
 
 // === Step 3: 交叉校验 ===
-function crossValidate(cacheDir) {
+function crossValidate(cacheDir, data) {
   console.log('\n[3/5] 交叉校验 style.* vs node.css...');
 
-  const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
-  if (!fs.existsSync(payloadPath)) {
+  if (!data) {
     console.log('  ⚠ 无 agent payload，跳过校验');
     return [];
   }
 
-  const data = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
   const root = data?.designSnapshot?.root;
   if (!root) {
     console.log('  ⚠ 无 designSnapshot，跳过校验');
@@ -261,16 +257,14 @@ function externalizeSvgImages(svg, assetsDir) {
   });
 }
 
-function generateBaseline(cacheDir) {
+function generateBaseline(cacheDir, data) {
   console.log('\n[4/5] 生成 baseline PNG...');
 
-  const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
-  if (!fs.existsSync(payloadPath)) {
+  if (!data) {
     console.log('  ⚠ 无 agent payload，跳过');
     return null;
   }
 
-  const data = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
   const svg = data?.designSnapshot?.root?.svgString;
   if (!svg) {
     console.log('  ⚠ 节点无 svgString，跳过 baseline 生成');
@@ -335,8 +329,12 @@ function summary(agentResult, warnings, baselinePath) {
   console.log('─'.repeat(50));
 
   const node = agentResult?.bridge?.node;
+  const target = agentResult?.bridge?.target;
   console.log(`  节点: ${node?.name || 'unknown'} (${node?.id || ''})`);
   console.log(`  类型: ${node?.type || ''}`);
+  if (target?.url) {
+    console.log(`  链接: ${target.url}`);
+  }
 
   const diag = agentResult?.bridge?.diagnostics?.designSnapshot;
   if (diag) {
@@ -365,7 +363,7 @@ function summary(agentResult, warnings, baselinePath) {
 async function main() {
   const url = process.argv.slice(2).join(' ').trim();
   if (!url) {
-    console.log('用法: node ./scripts/figma_pipeline.mjs "<figma-url>"');
+    console.log('用法: node ./scripts/figma_pipeline.mjs "<figma-url-or-node-id>"');
     process.exit(1);
   }
 
@@ -373,6 +371,11 @@ async function main() {
 
   const agentResult = bridgeExtract(url);
   if (!agentResult) process.exit(1);
+
+  const resolvedUrl = agentResult.bridge?.target?.url || url;
+  if (resolvedUrl !== url) {
+    console.log(`  → 解析到完整链接: ${resolvedUrl}`);
+  }
 
   const cacheDir = agentResult.bridge?.cacheDir
     || agentResult.agentPayload?.cacheDir
@@ -383,10 +386,15 @@ async function main() {
     process.exit(1);
   }
 
-  fetchDeferredAssets(url, cacheDir);
-  mergeCache(url);
-  const warnings = crossValidate(cacheDir);
-  const baselinePath = generateBaseline(cacheDir);
+  const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
+  const agentPayload = fs.existsSync(payloadPath)
+    ? JSON.parse(fs.readFileSync(payloadPath, 'utf-8'))
+    : null;
+
+  fetchDeferredAssets(resolvedUrl, agentPayload);
+  mergeCache(resolvedUrl);
+  const warnings = crossValidate(cacheDir, agentPayload);
+  const baselinePath = generateBaseline(cacheDir, agentPayload);
   summary(agentResult, warnings, baselinePath);
 }
 
