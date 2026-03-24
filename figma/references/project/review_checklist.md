@@ -89,7 +89,7 @@ Notes
 - `bridge_client.mjs` internal structure not yet refactored (deferred to future step)
 
 ## Remaining Risks
-- `ui.html` loads `<script src="./generated/runtime-config.js">` and `<script src="./generated/ui.js">` — Figma Desktop resolves these relative to the plugin directory. If Figma changes how UI HTML is loaded (e.g., string injection instead of file-based iframe), these references would break.
+- UI is now generated as a self-contained HTML file (`ui.html` is produced by `build:ws-defs-ui-html` which inlines both runtime-config and ui bundle). External script path resolution is no longer a runtime dependency for `figma.showUI(__html__)`.
 - `allowedDomains: ["none"]` means the plugin only works in development mode. Production deployment would require configuring allowed domains.
 - Result chunk transport now enforces single-chunk, cumulative, and count limits (413 rejection). Multi-byte characters use UTF-8 byte-based chunking.
 - Asset extraction now performs a dimension-based preflight (`assetMaxPixels`) before `getBytesAsync()`, but peak memory protection remains best-effort: if `getSizeAsync()` is unavailable or fails, or a moderate-dimension image has a very large encoded payload, the plugin can still hit the byte-size failure only after reading bytes.

@@ -77,25 +77,30 @@ function main() {
     fail('code.js: missing BRIDGE_EVENTS_URL');
   }
 
-  // 4. Check ui.html only references expected scripts
+  // 4. Check ui.html is self-contained: no external <script src=...>, at least 2 inline scripts,
+  //    no unresolved template placeholders, and inlined runtime config present.
   const uiHtml = fileContents['ui.html'];
-  const scriptSrcPattern = /src="([^"]+)"/g;
-  const allowedSources = new Set([
-    './generated/runtime-config.js',
-    './generated/ui.js',
-  ]);
-  let scriptMatch;
-  while ((scriptMatch = scriptSrcPattern.exec(uiHtml)) !== null) {
-    if (!allowedSources.has(scriptMatch[1])) {
-      fail(`ui.html: unexpected script src="${scriptMatch[1]}"`);
-    }
+
+  const externalScriptPattern = /<script[^>]+src=/gi;
+  if (externalScriptPattern.test(uiHtml)) {
+    fail('ui.html: contains external <script src=...>; final UI must be self-contained');
   }
 
-  // Check no inline script content
-  const inlineScriptPattern = /<script>[\s\S]*?<\/script>/gi;
+  const inlineScriptPattern = /<script>([\s\S]*?)<\/script>/gi;
   const inlineScripts = uiHtml.match(inlineScriptPattern);
-  if (inlineScripts && inlineScripts.length > 0) {
-    fail('ui.html: contains inline <script> content (should only have src= references)');
+  if (!inlineScripts || inlineScripts.length < 2) {
+    fail('ui.html: expected at least 2 inline <script> blocks (runtime-config + ui bundle)');
+  }
+
+  if (
+    uiHtml.includes('WS_DEFS_RUNTIME_CONFIG_SCRIPT') ||
+    uiHtml.includes('WS_DEFS_UI_BUNDLE_SCRIPT')
+  ) {
+    fail('ui.html: template placeholders were not replaced — run npm run build:ws-defs-ui-html');
+  }
+
+  if (!uiHtml.includes('__WS_DEFS_CONFIG__')) {
+    fail('ui.html: missing inlined runtime config (__WS_DEFS_CONFIG__ not found)');
   }
 
   reportAndExit();

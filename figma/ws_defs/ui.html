@@ -25,7 +25,233 @@
 <button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">获取选中节点 ID</button>
 <div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="点击复制"></div>
 <div id="log"></div>
-<script src="./generated/runtime-config.js"></script>
-<script src="./generated/ui.js"></script>
+<script>
+// AUTO-GENERATED FILE. DO NOT EDIT.
+// Run: node ./skills/figma/scripts/sync_ws_defs_config.mjs
+(function initWsDefsConfig(globalObject) {
+  var config = Object.freeze(
+    {
+      "bindHost": "127.0.0.1",
+      "publicHost": "localhost",
+      "port": 3333,
+      "origin": "http://localhost:3333",
+      "eventsUrl": "http://localhost:3333/events",
+      "extractNodeDefsUrl": "http://localhost:3333/extract-node-defs",
+      "extractImageAssetUrl": "http://localhost:3333/extract-image-asset",
+      "resultTransport": {
+        "chunkSizeBytes": 524288,
+        "maxChunkBytes": 524288,
+        "maxTotalBytes": 25165824,
+        "maxChunkCount": 48
+      }
+    }
+  );
+  globalObject.__WS_DEFS_CONFIG__ = config;
+  globalObject.WS_DEFS_CONFIG = config;
+  globalObject.BRIDGE_BASE_URL = config.origin;
+  globalObject.BRIDGE_EVENTS_URL = config.eventsUrl;
+})(typeof globalThis !== 'undefined' ? globalThis : window);
+
+var WS_DEFS_CONFIG = globalThis.__WS_DEFS_CONFIG__;
+var BRIDGE_BASE_URL = globalThis.BRIDGE_BASE_URL;
+var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
+</script>
+<script>
+// AUTO-GENERATED FILE. DO NOT EDIT.
+// Run: npm run build:ws-defs-ui
+"use strict";
+(() => {
+  // skills/figma/ws_defs/ui/bridge_sse.ts
+  function createBridgeConnection(options) {
+    const { eventsUrl, onBridgeStatus, forwardBridgeCommand: forwardBridgeCommand2 } = options;
+    let eventSource = null;
+    function handleBridgeJob(eventName, event, forwardType) {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (!payload.jobId) {
+          onBridgeStatus("收到无效 job，已忽略", "error");
+          return;
+        }
+        onBridgeStatus("收到 " + eventName + " job " + payload.jobId, "ok");
+        forwardBridgeCommand2(forwardType, payload);
+      } catch {
+        onBridgeStatus("Bridge 事件解析失败", "error");
+      }
+    }
+    function connect() {
+      if (eventSource) {
+        eventSource.close();
+      }
+      onBridgeStatus("Bridge SSE 连接中...", "loading");
+      eventSource = new EventSource(eventsUrl);
+      eventSource.addEventListener("ready", () => {
+        onBridgeStatus("Bridge SSE 已连接", "ok");
+      });
+      eventSource.addEventListener("extract-node-defs", (event) => {
+        handleBridgeJob(
+          "extract-node-defs",
+          event,
+          "extract-node-defs"
+        );
+      });
+      eventSource.addEventListener("extract-image-asset", (event) => {
+        handleBridgeJob(
+          "extract-image-asset",
+          event,
+          "extract-image-asset"
+        );
+      });
+      eventSource.onerror = () => {
+        onBridgeStatus("Bridge SSE 已断开，等待重连...", "error");
+      };
+    }
+    function disconnect() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+    }
+    function reconnect() {
+      connect();
+    }
+    return {
+      connect,
+      disconnect,
+      reconnect
+    };
+  }
+
+  // skills/figma/ws_defs/ui/dom.ts
+  function getElement(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      throw new Error(`Missing DOM element: #${id}`);
+    }
+    return el;
+  }
+  function createUiDomController() {
+    const bridgeEl = getElement("bridge");
+    const statusEl = getElement("status");
+    const nodeIdEl = getElement("node-id");
+    const logEl = getElement("log");
+    const reconnectButton = getElement("reconnect-button");
+    const nodeIdButton = getElement("get-node-id-button");
+    let lastBridgeStatus = "";
+    function appendLog(text) {
+      logEl.innerHTML = (/* @__PURE__ */ new Date()).toLocaleTimeString() + " " + text + "<br>" + logEl.innerHTML;
+    }
+    function setStatus(text, state) {
+      statusEl.textContent = text;
+      statusEl.className = state || "";
+      appendLog(text);
+    }
+    function setBridgeStatus(text, state) {
+      bridgeEl.textContent = text;
+      bridgeEl.className = state || "";
+      const key = text + "|" + (state || "");
+      if (lastBridgeStatus !== key) {
+        lastBridgeStatus = key;
+        appendLog(text);
+      }
+    }
+    function renderNodeIdResult(ids, fileKey) {
+      nodeIdEl.style.display = "block";
+      if (ids && ids.length > 0) {
+        const lines = ids.map((id) => {
+          if (fileKey) {
+            return "https://www.figma.com/design/" + fileKey + "?node-id=" + encodeURIComponent(id);
+          }
+          return id;
+        });
+        nodeIdEl.textContent = lines.join("\n");
+        nodeIdEl.style.background = "#e3f9e5";
+        nodeIdEl.style.whiteSpace = "pre-wrap";
+        appendLog("选中节点: " + lines.join(", "));
+      } else {
+        nodeIdEl.textContent = "未选中任何节点";
+        nodeIdEl.style.background = "#ffeef0";
+      }
+    }
+    async function copyNodeIdText() {
+      if (nodeIdEl.textContent) {
+        await navigator.clipboard.writeText(nodeIdEl.textContent);
+        appendLog("已复制: " + nodeIdEl.textContent);
+      }
+    }
+    return {
+      appendLog,
+      setStatus,
+      setBridgeStatus,
+      renderNodeIdResult,
+      copyNodeIdText,
+      reconnectButton,
+      nodeIdButton,
+      nodeIdEl
+    };
+  }
+
+  // skills/figma/ws_defs/ui/plugin_api.ts
+  function postPluginMessage(message) {
+    parent.postMessage({ pluginMessage: message }, "*");
+  }
+  function requestSelectedNodeIds() {
+    postPluginMessage({ type: "get-node-id" });
+  }
+  function forwardBridgeCommand(type, payload) {
+    postPluginMessage({
+      type,
+      payload
+    });
+  }
+  function readPluginMessage(event) {
+    const data = event.data;
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    const msg = data.pluginMessage;
+    if (!msg || typeof msg !== "object" || typeof msg.type !== "string") {
+      return null;
+    }
+    return msg;
+  }
+
+  // skills/figma/ws_defs/ui/main.ts
+  function boot() {
+    const config = window.__WS_DEFS_CONFIG__;
+    if (!config) {
+      throw new Error("window.__WS_DEFS_CONFIG__ is not defined");
+    }
+    const dom = createUiDomController();
+    const bridge = createBridgeConnection({
+      eventsUrl: config.eventsUrl,
+      onBridgeStatus: dom.setBridgeStatus,
+      forwardBridgeCommand
+    });
+    dom.reconnectButton.addEventListener("click", () => {
+      bridge.reconnect();
+    });
+    dom.nodeIdButton.addEventListener("click", () => {
+      requestSelectedNodeIds();
+    });
+    dom.nodeIdEl.addEventListener("click", () => {
+      void dom.copyNodeIdText();
+    });
+    window.addEventListener("message", (event) => {
+      const msg = readPluginMessage(event);
+      if (!msg) {
+        return;
+      }
+      if (msg.type === "status") {
+        dom.setStatus(msg.text, msg.state);
+      }
+      if (msg.type === "node-id-result") {
+        dom.renderNodeIdResult(msg.ids, msg.fileKey);
+      }
+    });
+    bridge.connect();
+  }
+  boot();
+})();
+</script>
 </body>
 </html>
