@@ -1,3 +1,47 @@
+function getImagePixelCount(width, height) {
+  if (
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !isFinite(width) ||
+    !isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  return width * height;
+}
+
+function estimateRawImageBytes(pixelCount) {
+  if (typeof pixelCount !== 'number' || !isFinite(pixelCount) || pixelCount <= 0) {
+    return null;
+  }
+  return pixelCount * 4;
+}
+
+function assertImageWithinPreflightLimits(asset, options) {
+  var assetMaxPixels = Number(options.assetMaxPixels) || 0;
+  var pixelCount = getImagePixelCount(asset.width, asset.height);
+
+  if (!assetMaxPixels || pixelCount == null || pixelCount <= assetMaxPixels) {
+    return;
+  }
+
+  throw createPluginError(
+    'IMAGE_TOO_LARGE_ESTIMATED',
+    '图片尺寸预估超限，跳过二进制读取',
+    {
+      imageHash: asset.imageHash,
+      width: asset.width,
+      height: asset.height,
+      pixelCount: pixelCount,
+      assetMaxPixels: assetMaxPixels,
+      estimatedMaxBytes: estimateRawImageBytes(pixelCount),
+      assetMaxBytes: options.assetMaxBytes,
+    }
+  );
+}
+
 async function resolveImageAssets(imageResources, options, reportStage) {
   const assets = {};
   const imageRecords = Array.isArray(imageResources)
@@ -75,6 +119,15 @@ async function resolveImageAssets(imageResources, options, reportStage) {
             }
           }
 
+          const pixelCount = getImagePixelCount(asset.width, asset.height);
+          if (pixelCount != null) {
+            asset.pixelCount = pixelCount;
+            const assetMaxPixels = Number(options.assetMaxPixels) || 0;
+            if (assetMaxPixels && pixelCount > assetMaxPixels) {
+              asset.estimatedTooLarge = true;
+            }
+          }
+
           assets[record.imageHash] = asset;
           diagnostics.resolved += 1;
         } catch (error) {
@@ -143,6 +196,22 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
       width: asset.width,
       height: asset.height,
     });
+  }
+
+  try {
+    assertImageWithinPreflightLimits(asset, mergedOptions);
+  } catch (preflightError) {
+    if (reportStage) {
+      reportStage.error(
+        'asset.preflight.rejected',
+        '图片尺寸预估超限，跳过二进制读取',
+        preflightError.details
+      );
+    }
+    throw preflightError;
+  }
+
+  if (reportStage) {
     reportStage.loading('asset.bytes.start', '图片二进制读取中', {
       imageHash: imageHash,
     });

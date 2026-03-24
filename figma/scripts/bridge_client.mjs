@@ -398,7 +398,14 @@ async function runAssetFetch(targetInput, imageHash) {
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}));
-      return { ok: false, error: errBody.error || `HTTP ${response.status}`, target };
+      return {
+        ok: false,
+        error: errBody.error || `HTTP ${response.status}`,
+        errorCode: errBody.errorCode || null,
+        details: errBody.details || null,
+        status: response.status,
+        target,
+      };
     }
 
     const contentType = response.headers.get('content-type') || '';

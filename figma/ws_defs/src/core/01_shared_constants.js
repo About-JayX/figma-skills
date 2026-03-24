@@ -15,6 +15,7 @@ const DEFAULT_EXTRACTION_OPTIONS = {
   imageTimeoutMs: 2000,
   imageBytesTimeoutMs: 12000,
   assetMaxBytes: 32 * 1024 * 1024,
+  assetMaxPixels: 3200 * 3200,
   includeInvisibleInstanceChildren: false,
   restTimeoutMs: 5000,
   restMaxBytes: 3000000,

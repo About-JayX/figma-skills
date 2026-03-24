@@ -73,17 +73,31 @@ export async function handleExtractImageAssetRequest(state, req, res) {
       assetPromise,
       job.promise.then((result) => {
         if (result && result.ok === false) {
-          return { _error: result.error || result.errorCode || 'plugin error' };
+          return {
+            _pluginError: {
+              error: result.error || result.errorCode || 'plugin error',
+              errorCode: result.errorCode || 'PLUGIN_ERROR',
+              details: result.details || null,
+            },
+          };
         }
         return null;
       }),
     ]);
 
-    if (assetData && assetData._error) {
-      writeJson(res, 502, {
+    if (assetData && assetData._pluginError) {
+      const pluginError = assetData._pluginError;
+      const statusCode =
+        pluginError.errorCode === 'IMAGE_TOO_LARGE' ||
+        pluginError.errorCode === 'IMAGE_TOO_LARGE_ESTIMATED'
+          ? 413
+          : 502;
+
+      writeJson(res, statusCode, {
         ok: false,
-        error: `插件端错误: ${assetData._error}`,
-        errorCode: 'PLUGIN_ERROR',
+        error: pluginError.error,
+        errorCode: pluginError.errorCode,
+        details: pluginError.details,
       });
       return;
     }

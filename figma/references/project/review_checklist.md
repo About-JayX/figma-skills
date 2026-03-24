@@ -23,6 +23,7 @@ Run all at once: `npm run verify`
 | 4 | Plugin connection | With bridge running, confirm `/health` shows `pluginConnections > 0` |
 | 5 | extract-node-defs | Run `node scripts/bridge_client.mjs agent <figma-url>`, confirm defs returned |
 | 6 | extract-image-asset | If design has images, run `node scripts/bridge_client.mjs asset <figma-url> <hash>` |
+| 7 | oversized image preflight | Use an image with pixel dimensions clearly exceeding `assetMaxPixels` (3200×3200); confirm bridge returns `413` + `errorCode: IMAGE_TOO_LARGE_ESTIMATED` before bytes are read |
 
 ## Migration Summary
 
@@ -52,5 +53,5 @@ Run all at once: `npm run verify`
 - `ui.html` loads `<script src="./generated/runtime-config.js">` and `<script src="./generated/ui.js">` — Figma Desktop resolves these relative to the plugin directory. If Figma changes how UI HTML is loaded (e.g., string injection instead of file-based iframe), these references would break.
 - `allowedDomains: ["none"]` means the plugin only works in development mode. Production deployment would require configuring allowed domains.
 - Result chunk transport now enforces single-chunk, cumulative, and count limits (413 rejection). Multi-byte characters use UTF-8 byte-based chunking.
-- Image asset `getBytesAsync()` still reads full binary before size check; peak memory risk for oversized images not yet mitigated (deferred to next step).
+- Asset extraction now performs a dimension-based preflight (`assetMaxPixels`) before `getBytesAsync()`, but peak memory protection remains best-effort: if `getSizeAsync()` is unavailable or fails, or a moderate-dimension image has a very large encoded payload, the plugin can still hit the byte-size failure only after reading bytes.
 - Real Figma Desktop large-payload / large-image smoke test not yet completed.
