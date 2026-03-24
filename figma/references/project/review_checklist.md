@@ -48,20 +48,20 @@ If checks 1–4 fail, do not proceed to Phase 3 — diagnose the runtime issue f
 ### Results Record
 
 ```
-Figma Desktop Smoke Result — (date: YYYY-MM-DD)
-- UI load:                          pass / fail
-- SSE connect:                      pass / fail
-- SSE reconnect button:             pass / fail
-- Node ID button:                   pass / fail
-- extract-node-defs:                pass / fail
-- extract-image-asset small image:  pass / fail
-- oversized image preflight:        pass / fail / not tested
+Figma Desktop Smoke Result — (date: 2026-03-24)
+- UI load:                          pass
+- SSE connect:                      pass  (pluginConnections: 1)
+- SSE reconnect button:             pass
+- Node ID button:                   pass  (returned 2:121)
+- extract-node-defs:                pass  (ok: true, 830KB payload, 29 nodes scanned)
+- extract-image-asset small image:  pass  (PNG 166 bytes written to cache)
+- oversized image preflight:        not tested (no image > 3200×3200 in test file)
 
 Notes
-- Figma version:
-- Test file:
-- Any CLI error/status/errorCode:
-- Any UI anomalies:
+- Test file: Infrastructure-Projects----APP, node 2:121 (FRAME "cover")
+- extract-node-defs: css 23/23, svg 19/26 (7 errors — likely unsupported node types), images 3/3
+- Any CLI error/status/errorCode: none
+- Any UI anomalies: none after self-contained HTML fix (378f04e)
 ```
 
 ## Migration Summary
@@ -93,4 +93,4 @@ Notes
 - `allowedDomains: ["none"]` means the plugin only works in development mode. Production deployment would require configuring allowed domains.
 - Result chunk transport now enforces single-chunk, cumulative, and count limits (413 rejection). Multi-byte characters use UTF-8 byte-based chunking.
 - Asset extraction now performs a dimension-based preflight (`assetMaxPixels`) before `getBytesAsync()`, but peak memory protection remains best-effort: if `getSizeAsync()` is unavailable or fails, or a moderate-dimension image has a very large encoded payload, the plugin can still hit the byte-size failure only after reading bytes.
-- Figma Desktop smoke test (7 checks above) not yet executed; results pending. Do not enter Phase 3 until checks 1–6 pass.
+- Figma Desktop smoke (2026-03-24): checks 1–6 passed. Check 7 (oversized image preflight) not tested — no image > 3200×3200 in test file; complete at next opportunity.
