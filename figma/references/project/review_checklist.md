@@ -10,6 +10,7 @@
 | 4 | Generated artifacts consistency | `npm run verify:artifacts` | |
 | 5 | Bridge server startup + /health + client | `npm run verify:bridge` | |
 | 6 | Result chunk limits + UTF-8 round-trip | `npm run verify:chunks` | |
+| 7 | extract-image-asset route error paths | `npm run verify:asset-route` | |
 
 Run all at once: `npm run verify`
 
