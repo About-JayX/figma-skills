@@ -16,15 +16,53 @@ Run all at once: `npm run verify`
 
 ## Manual Verification (requires Figma Desktop)
 
-| # | Check | Steps |
-|---|-------|-------|
-| 1 | Plugin UI loads | Import `ws_defs/manifest.json` in Figma Desktop, run plugin, confirm no white screen or script errors |
-| 2 | SSE reconnect button | Click "重新连接 SSE", confirm bridge status toggles |
-| 3 | Node ID button | Select a node, click "获取选中节点 ID", confirm ID appears and is copyable |
-| 4 | Plugin connection | With bridge running, confirm `/health` shows `pluginConnections > 0` |
-| 5 | extract-node-defs | Run `node scripts/bridge_client.mjs agent <figma-url>`, confirm defs returned |
-| 6 | extract-image-asset | If design has images, run `node scripts/bridge_client.mjs asset <figma-url> <hash>` |
-| 7 | oversized image preflight | Use an image with pixel dimensions clearly exceeding `assetMaxPixels` (3200×3200); confirm bridge returns `413` + `errorCode: IMAGE_TOO_LARGE_ESTIMATED` before bytes are read |
+### Prerequisites
+
+```bash
+# 1. Ensure artifacts are fresh
+npm run build:legacy
+
+# 2. Start bridge server (keep running in a separate terminal)
+node ./skills/figma/scripts/bridge_server.mjs
+
+# 3. Optional: confirm bridge is healthy
+node ./skills/figma/scripts/bridge_client.mjs health
+```
+
+### Smoke Checks
+
+| # | Check | Expected outcome |
+|---|-------|-----------------|
+| 1 | Plugin UI loads | Import `ws_defs/manifest.json`, run plugin → no white screen; status area shows "已就绪" or equivalent ready text |
+| 2 | SSE connects | Plugin status changes from "连接中" → "已连接"; `bridge_client.mjs health` shows `pluginConnections > 0` |
+| 3 | SSE reconnect button | Click "重新连接 SSE" → status briefly shows "连接中", recovers to "已连接"; health still `pluginConnections > 0` |
+| 4 | Node ID button | Select a canvas node, click "获取选中节点 ID" → node ID or Figma URL appears and is copyable |
+| 5 | extract-node-defs | `node ./skills/figma/scripts/bridge_client.mjs agent "<figma-node-url>"` → `ok: true`, defs returned, cache populated |
+| 6 | extract-image-asset (small) | `node ./skills/figma/scripts/bridge_client.mjs asset "<figma-node-url>" "<hash>"` → `ok: true`, file written to `assets/`, `byteLength` present |
+| 7 | oversized image preflight | Same command with an image clearly > 3200×3200 → `ok: false`, `status: 413`, `errorCode: "IMAGE_TOO_LARGE_ESTIMATED"`, `details.pixelCount` and `details.assetMaxPixels` present; plugin UI does not freeze |
+
+**Pass criteria:** checks 1–6 all pass. Check 7 is best-effort (record `not tested` if no oversized image is available, but complete it at next opportunity).
+
+If checks 1–4 fail, do not proceed to Phase 3 — diagnose the runtime issue first.
+
+### Results Record
+
+```
+Figma Desktop Smoke Result — (date: YYYY-MM-DD)
+- UI load:                          pass / fail
+- SSE connect:                      pass / fail
+- SSE reconnect button:             pass / fail
+- Node ID button:                   pass / fail
+- extract-node-defs:                pass / fail
+- extract-image-asset small image:  pass / fail
+- oversized image preflight:        pass / fail / not tested
+
+Notes
+- Figma version:
+- Test file:
+- Any CLI error/status/errorCode:
+- Any UI anomalies:
+```
 
 ## Migration Summary
 
@@ -55,4 +93,4 @@ Run all at once: `npm run verify`
 - `allowedDomains: ["none"]` means the plugin only works in development mode. Production deployment would require configuring allowed domains.
 - Result chunk transport now enforces single-chunk, cumulative, and count limits (413 rejection). Multi-byte characters use UTF-8 byte-based chunking.
 - Asset extraction now performs a dimension-based preflight (`assetMaxPixels`) before `getBytesAsync()`, but peak memory protection remains best-effort: if `getSizeAsync()` is unavailable or fails, or a moderate-dimension image has a very large encoded payload, the plugin can still hit the byte-size failure only after reading bytes.
-- Real Figma Desktop large-payload / large-image smoke test not yet completed.
+- Figma Desktop smoke test (7 checks above) not yet executed; results pending. Do not enter Phase 3 until checks 1–6 pass.
