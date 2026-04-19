@@ -343,16 +343,34 @@ function generateBaseline(cacheDir, data) {
     return null;
   }
 
+  // A8 path: plugin may have uploaded a frame PNG baseline as
+  // assets/_baseline_<node-id>.png. If present, promote it to baseline/baseline.png
+  // and return directly.
+  const baselineDir = path.join(cacheDir, 'baseline');
+  const assetsDir = path.join(cacheDir, 'assets');
+  if (fs.existsSync(assetsDir)) {
+    const baselineAsset = fs.readdirSync(assetsDir).find(
+      (f) => f.startsWith('_baseline_') && f.endsWith('.png')
+    );
+    if (baselineAsset) {
+      fs.mkdirSync(baselineDir, { recursive: true });
+      const src = path.join(assetsDir, baselineAsset);
+      const dst = path.join(baselineDir, 'baseline.png');
+      fs.copyFileSync(src, dst);
+      const size = fs.statSync(dst).size;
+      console.log(`  ✓ baseline 生成 (plugin A8): ${dst} (${(size / 1024).toFixed(0)}KB)`);
+      return dst;
+    }
+  }
+
   const svg = data?.designSnapshot?.root?.svgString;
   if (!svg) {
-    console.log('  ⚠ 节点无 svgString，跳过 baseline 生成');
+    console.log('  ⚠ 节点无 svgString 且 plugin 未上传 baseline，跳过');
     return null;
   }
 
-  const baselineDir = path.join(cacheDir, 'baseline');
   fs.mkdirSync(baselineDir, { recursive: true });
 
-  const assetsDir = path.join(cacheDir, 'assets');
   const svgExternalized = externalizeSvgImages(svg, assetsDir);
   const reduced = svgExternalized.length < svg.length;
   if (reduced) {

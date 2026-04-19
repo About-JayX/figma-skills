@@ -33,6 +33,19 @@ function normalizeJobResult(state, job, payload) {
   if (pendingBlobs.length > 0) {
     result.sideChannelBlobs = pendingBlobs.map((blob) => Object.assign({}, blob));
   }
+  // A8: carry pending assets forward so bridge_cache can persist them. Without
+  // this, assets uploaded via postJobAsset during extract-node-defs are cleared
+  // when the job resolves. Bytes are Buffer instances; caller is responsible
+  // for writing them to disk and stripping before JSON serialization.
+  const pendingAssets = state.pendingAssets.get(job.jobId) || [];
+  if (pendingAssets.length > 0) {
+    result.sideChannelAssets = pendingAssets.map((asset) => ({
+      hash: asset.hash,
+      format: asset.format,
+      bytes: asset.bytes,
+      receivedAt: asset.receivedAt,
+    }));
+  }
   result.returnedAt = new Date().toISOString();
   return result;
 }

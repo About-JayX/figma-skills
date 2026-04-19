@@ -348,6 +348,47 @@ export function materializeEmbeddedImageAssets(data, cacheDir) {
   return assetFiles;
 }
 
+// A8: side-channel binary assets uploaded via /jobs/:jobId/asset (e.g. FRAME
+// baseline PNGs). Persists each to cache/<key>/assets/<hash>.<format> and
+// strips the Buffer from the result object so JSON serialization stays clean.
+function coerceToBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  // Buffer round-tripped through JSON becomes { type: 'Buffer', data: [...] }
+  if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+    return Buffer.from(value.data);
+  }
+  return null;
+}
+
+export function materializeSideChannelAssets(data, cacheDir) {
+  const assets = Array.isArray(data && data.sideChannelAssets) ? data.sideChannelAssets : [];
+  if (assets.length === 0) {
+    return {};
+  }
+
+  const assetFiles = {};
+  for (const asset of assets) {
+    if (!asset || !asset.hash) continue;
+    const buf = coerceToBuffer(asset.bytes);
+    if (!buf) continue;
+    const metadata = upsertAssetMetadata(cacheDir, {
+      imageHash: asset.hash,
+      format: asset.format || 'png',
+      bytes: buf,
+      byteLength: buf.length,
+    });
+    if (metadata) {
+      assetFiles[asset.hash] = metadata;
+      asset.fileName = metadata.fileName;
+      asset.relativePath = metadata.relativePath;
+      asset.localPath = metadata.localPath;
+      asset.byteLength = metadata.byteLength;
+    }
+    delete asset.bytes;
+  }
+  return assetFiles;
+}
+
 export function materializeSideChannelBlobs(data, cacheDir) {
   const blobs = Array.isArray(data && data.sideChannelBlobs) ? data.sideChannelBlobs : [];
   if (blobs.length === 0) {
@@ -406,6 +447,7 @@ export function persistBridgeResult(result) {
 
   const cacheDir = ensureCacheDirForResult(result);
   const assetFiles = materializeEmbeddedImageAssets(result, cacheDir);
+  const sideAssetFiles = materializeSideChannelAssets(result, cacheDir);
   const blobFiles = materializeSideChannelBlobs(result, cacheDir);
 
   // Write bridge-response first (largest), then build+write agent payload.
@@ -417,7 +459,7 @@ export function persistBridgeResult(result) {
 
   writeJsonFile(
     path.join(cacheDir, 'cache-manifest.json'),
-    buildCacheManifest(result, cacheDir, Object.assign({}, assetFiles, blobFiles))
+    buildCacheManifest(result, cacheDir, Object.assign({}, assetFiles, sideAssetFiles, blobFiles))
   );
   return cacheDir;
 }

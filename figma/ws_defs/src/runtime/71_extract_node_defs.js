@@ -42,6 +42,56 @@ async function handleExtractNodeDefs(command) {
 
   const extraction = await buildNodeExtraction(node, extractionOptions, reportStage);
   const defs = extraction.defs;
+
+  // A8 (scoped): export the target node as a PNG baseline for scorecard runs.
+  // Runs for frame-like containers only (TEXT/VECTOR already render as-is via
+  // their own SVG path). Non-fatal: if exportAsync fails, skip quietly so the
+  // main extraction still succeeds.
+  const BASELINE_EXPORTABLE_TYPES = {
+    FRAME: true,
+    SECTION: true,
+    COMPONENT: true,
+    COMPONENT_SET: true,
+    INSTANCE: true,
+    GROUP: true,
+  };
+  if (BASELINE_EXPORTABLE_TYPES[node.type] && typeof node.exportAsync === 'function') {
+    try {
+      reportStage.loading('baseline.export.start', 'baseline PNG 导出中', {
+        nodeId: node.id,
+        nodeType: node.type,
+      });
+      const pngBytes = await node.exportAsync({
+        format: 'PNG',
+        constraint: { type: 'SCALE', value: 2 },
+        useAbsoluteBounds: true,
+      });
+      if (pngBytes && pngBytes.length > 0) {
+        await postJobAsset(
+          jobId,
+          {
+            imageHash: '_baseline_' + node.id.replace(/[^A-Za-z0-9_-]/g, '-'),
+            format: 'png',
+            bytes: pngBytes,
+            byteLength: pngBytes.length,
+            width: Math.round((node.width || 0) * 2),
+            height: Math.round((node.height || 0) * 2),
+          },
+          reportStage
+        );
+        reportStage.ok('baseline.export.done', 'baseline PNG 已上传', {
+          nodeId: node.id,
+          byteLength: pngBytes.length,
+        });
+      }
+    } catch (baselineError) {
+      reportStage.ok('baseline.export.skipped', 'baseline PNG 导出失败，跳过', {
+        nodeId: node.id,
+        error: baselineError && baselineError.message ? baselineError.message : String(baselineError),
+      });
+    }
+  }
+
   reportStage.ok('job.extract.done', '提取阶段完成，准备回传', {
     defsTotal: defs && defs.summary ? defs.summary.total : null,
     imageAssets:
