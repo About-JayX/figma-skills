@@ -170,14 +170,23 @@ mask 实现普遍复杂，多数情况下升级为 `SVG_ISLAND` 路由（见 `08
 
 ## Corner Radius
 
+Bridge 按两种结构序列化，**不共存**：
+
+- 四角均等 → `style.cornerRadius` 单值
+- 四角不等 → `style.cornerRadii.{topLeft, topRight, bottomRight, bottomLeft}` 对象
+
 ```css
-border-top-left-radius:     <style.topLeftRadius>px;
-border-top-right-radius:    <style.topRightRadius>px;
-border-bottom-left-radius:  <style.bottomLeftRadius>px;
-border-bottom-right-radius: <style.bottomRightRadius>px;
-/* 四角相等可用 */
+/* 均等（style.cornerRadius 存在）*/
 border-radius: <cornerRadius>px;
+
+/* 不等（style.cornerRadii 存在）*/
+border-top-left-radius:     <cornerRadii.topLeft>px;
+border-top-right-radius:    <cornerRadii.topRight>px;
+border-bottom-right-radius: <cornerRadii.bottomRight>px;
+border-bottom-left-radius:  <cornerRadii.bottomLeft>px;
 ```
+
+**禁止**读 `style.topLeftRadius` 这种扁平字段——不存在，读到的永远是 undefined。
 
 ## Opacity
 

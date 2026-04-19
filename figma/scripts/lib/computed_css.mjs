@@ -197,17 +197,21 @@ export function buildNodeAppearance(node, precomputedGradient) {
     a.opacity = String(Math.round(style.opacity * 1000) / 1000);
   }
 
-  // Border-radius (per corner, collapse when all equal)
-  const radii = [style.topLeftRadius, style.topRightRadius, style.bottomRightRadius, style.bottomLeftRadius];
-  if (radii.every((r) => typeof r === 'number')) {
-    const allEqual = radii.every((r) => Math.abs(r - radii[0]) < 0.01);
+  // Border-radius — bridge serializes either style.cornerRadius (uniform, scalar)
+  // OR style.cornerRadii (per-corner object), never flat style.topLeftRadius.
+  if (typeof style.cornerRadius === 'number' && style.cornerRadius > 0) {
+    a.borderRadius = px(style.cornerRadius);
+  } else if (style.cornerRadii && typeof style.cornerRadii === 'object') {
+    const { topLeft = 0, topRight = 0, bottomRight = 0, bottomLeft = 0 } = style.cornerRadii;
+    const radii = [topLeft, topRight, bottomRight, bottomLeft];
+    const allEqual = radii.every((r) => Math.abs(r - topLeft) < 0.01);
     if (allEqual) {
-      if (radii[0] > 0) a.borderRadius = px(radii[0]);
+      if (topLeft > 0) a.borderRadius = px(topLeft);
     } else {
-      a.borderTopLeftRadius = px(radii[0]);
-      a.borderTopRightRadius = px(radii[1]);
-      a.borderBottomRightRadius = px(radii[2]);
-      a.borderBottomLeftRadius = px(radii[3]);
+      a.borderTopLeftRadius = px(topLeft);
+      a.borderTopRightRadius = px(topRight);
+      a.borderBottomRightRadius = px(bottomRight);
+      a.borderBottomLeftRadius = px(bottomLeft);
     }
   }
 
@@ -215,9 +219,30 @@ export function buildNodeAppearance(node, precomputedGradient) {
   if (Array.isArray(style.strokes) && style.strokes.length > 0) {
     const solid = style.strokes.find((s) => s && s.visible !== false && s.type === 'SOLID');
     if (solid) {
-      const weight = style.strokeWeight ?? 1;
       const color = hexToRgba(solid.color, solid.opacity ?? 1);
-      a.border = `${px(weight)} solid ${color}`;
+      const isDashed = Array.isArray(style.dashPattern) && style.dashPattern.length > 0;
+      const styleName = isDashed ? 'dashed' : 'solid';
+      // INSIDE/CENTER → border (works with box-sizing: border-box)
+      // OUTSIDE → outline (doesn't reduce content area, matches Figma)
+      const prop = style.strokeAlign === 'OUTSIDE' ? 'outline' : 'border';
+      const w = style.strokeWeights;
+      if (w && typeof w === 'object' && [w.top, w.right, w.bottom, w.left].some((v) => typeof v === 'number')) {
+        // Per-side weights → border-*-width (outline has no per-side support, fallback to border)
+        if (typeof w.top === 'number') a.borderTopWidth = px(w.top);
+        if (typeof w.right === 'number') a.borderRightWidth = px(w.right);
+        if (typeof w.bottom === 'number') a.borderBottomWidth = px(w.bottom);
+        if (typeof w.left === 'number') a.borderLeftWidth = px(w.left);
+        a.borderStyle = styleName;
+        a.borderColor = color;
+      } else {
+        const weight = style.strokeWeight ?? 1;
+        if (prop === 'outline') {
+          a.outline = `${px(weight)} ${styleName} ${color}`;
+          a.outlineOffset = '0';
+        } else {
+          a.border = `${px(weight)} ${styleName} ${color}`;
+        }
+      }
     }
   }
 

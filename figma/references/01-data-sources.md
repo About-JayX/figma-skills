@@ -61,7 +61,11 @@
 | `style.effects[].offset.{x,y}` | shadow 偏移 | `box-shadow x y` | |
 | `style.effects[].spread` | shadow 扩散 | `box-shadow spread` | |
 | `style.effects[].color` | shadow 色 | `box-shadow color` | |
-| `style.topLeftRadius` / `topRightRadius` / `bottomLeftRadius` / `bottomRightRadius` | 四角 radius | `border-*-radius` | 均等时可合为 `border-radius` |
+| `style.cornerRadius` | 四角均等时的单值 radius | `border-radius` | 仅均等时出现 |
+| `style.cornerRadii.{topLeft, topRight, bottomRight, bottomLeft}` | 四角不等时的嵌套对象 | `border-*-radius` | 仅四角不等时出现 |
+| `style.strokeWeight` / `style.strokeWeights.{top,right,bottom,left}` | 描边粗细（均等 / 分边）| `border-width` / `border-*-width` | |
+| `style.strokeAlign` | `INSIDE` / `CENTER` / `OUTSIDE` | INSIDE/CENTER → `border`；OUTSIDE → `outline` | |
+| `style.dashPattern` | 虚线模式数组 | 非空 → `border-style: dashed` | |
 
 ## Text（仅 TEXT 节点）
 

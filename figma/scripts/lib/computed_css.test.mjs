@@ -73,10 +73,89 @@ test('buildNodeAppearance: precomputedGradient wins', () => {
   assert.equal(a.backgroundColor, undefined);
 });
 
-test('buildNodeAppearance: per-corner radius', () => {
-  const node = { style: { topLeftRadius: 7.246, topRightRadius: 7.246, bottomLeftRadius: 7.246, bottomRightRadius: 7.246 } };
+test('buildNodeAppearance: uniform radius via style.cornerRadius', () => {
+  const node = { style: { cornerRadius: 7.246 } };
   const a = buildNodeAppearance(node, null);
   assert.equal(a.borderRadius, '7.246px');
+});
+
+test('buildNodeAppearance: non-uniform radius via style.cornerRadii', () => {
+  const node = { style: { cornerRadii: { topLeft: 10, topRight: 20, bottomRight: 10, bottomLeft: 20 } } };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.borderTopLeftRadius, '10px');
+  assert.equal(a.borderTopRightRadius, '20px');
+  assert.equal(a.borderBottomRightRadius, '10px');
+  assert.equal(a.borderBottomLeftRadius, '20px');
+  assert.equal(a.borderRadius, undefined);
+});
+
+test('buildNodeAppearance: cornerRadii all equal collapses to single borderRadius', () => {
+  const node = { style: { cornerRadii: { topLeft: 4, topRight: 4, bottomRight: 4, bottomLeft: 4 } } };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.borderRadius, '4px');
+  assert.equal(a.borderTopLeftRadius, undefined);
+});
+
+test('buildNodeAppearance: flat style.topLeftRadius is ignored (not bridge format)', () => {
+  const node = { style: { topLeftRadius: 7, topRightRadius: 7, bottomLeftRadius: 7, bottomRightRadius: 7 } };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a, null);
+});
+
+test('buildNodeAppearance: stroke INSIDE uses border', () => {
+  const node = {
+    style: {
+      strokes: [{ type: 'SOLID', visible: true, color: { hex: '#000', a: 1 } }],
+      strokeWeight: 1.5,
+      strokeAlign: 'INSIDE',
+    },
+  };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.border, '1.5px solid #000');
+  assert.equal(a.outline, undefined);
+});
+
+test('buildNodeAppearance: stroke OUTSIDE uses outline', () => {
+  const node = {
+    style: {
+      strokes: [{ type: 'SOLID', visible: true, color: { hex: '#111', a: 1 } }],
+      strokeWeight: 2,
+      strokeAlign: 'OUTSIDE',
+    },
+  };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.outline, '2px solid #111');
+  assert.equal(a.border, undefined);
+});
+
+test('buildNodeAppearance: dashPattern triggers dashed style', () => {
+  const node = {
+    style: {
+      strokes: [{ type: 'SOLID', visible: true, color: { hex: '#555', a: 1 } }],
+      strokeWeight: 1,
+      strokeAlign: 'INSIDE',
+      dashPattern: [4, 2],
+    },
+  };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.border, '1px dashed #555');
+});
+
+test('buildNodeAppearance: per-side strokeWeights expand to border-*-width', () => {
+  const node = {
+    style: {
+      strokes: [{ type: 'SOLID', visible: true, color: { hex: '#222', a: 1 } }],
+      strokeWeights: { top: 1, right: 2, bottom: 1, left: 2 },
+      strokeAlign: 'INSIDE',
+    },
+  };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a.borderTopWidth, '1px');
+  assert.equal(a.borderRightWidth, '2px');
+  assert.equal(a.borderBottomWidth, '1px');
+  assert.equal(a.borderLeftWidth, '2px');
+  assert.equal(a.borderStyle, 'solid');
+  assert.equal(a.borderColor, '#222');
 });
 
 test('buildNodeAppearance: drop shadow', () => {
