@@ -127,6 +127,8 @@ xxxx    标题         true     1        渲染
 6. **CSS 变量替代色值前** — Read 变量定义确认值一致，否则写死 bridge 值
 7. **中文 12px 字号** — line-height 至少 16px（+2~4px 防截断）
 8. **物料组件默认透明背景**
+9. **富文本必须用 segment 链** — TEXT 节点 `text.segments[]` 有 ≥2 段异样样式时，逐段 `<span>`（或框架等价）渲染，不得仅按第一段整段渲染。详见 `./references/common/css-rules.md`「Styled text segments」。
+10. **层层偏差优先使用 `absoluteBoundingBox.width/height`** — 嵌套 FILL / stroke 场景出现 1-2px 误差时以 `absoluteBoundingBox` 为事实。`box-sizing: border-box` + `padding` + `border-width` 覆盖常规场景，`strokeAlign: INSIDE/CENTER/OUTSIDE` 见 css-rules「布局盒」。
 
 ### Step 4: 验收（强制）
 
