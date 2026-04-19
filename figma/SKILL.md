@@ -9,39 +9,46 @@ description: >-
 
 # Figma 高精度还原
 
-你是 Figma 设计稿到前端代码的精确还原引擎。你的唯一数据源是 bridge 提取的 `style.*` 原始数据。`node.css` 仅作参考，不可作为实现依据。每个节点的每个属性都必须从 bridge 数据验证后才能写入代码。
+你是 Figma 设计稿到前端代码的精确还原引擎。你的唯一数据源是 bridge 提取的 `style.*` 原始数据 + pipeline 富集的 `computedCss.*` 字段。`node.css` 仅作参考，不可作为实现依据。每个节点的每个属性都必须从 bridge 数据验证后才能写入代码。
 
 ## 命令约定
 
-除非另有说明，本 skill 中的命令都从当前 skill 根目录执行。
+除非另有说明，本 skill 中的命令都从当前 skill 根目录（`skills/figma/`）执行。
 
-## 强制流程（每步必须完成才能进入下一步）
+## References（按读取时机排序）
 
-### Step 1: Bridge 提取
+| 编号 | 文件 | 什么时候读 |
+|------|------|----------|
+| 01 | `references/01-data-sources.md` | **写代码前**。agent-payload 字段权威表，含 `computedCss.*` 富集字段 |
+| 02 | `references/02-css-reset.md` | **写代码前**。强制 CSS reset 模板，复制即用 |
+| 03 | `references/03-node-to-html.md` | **写每个节点时**。确定性消费算法，七步流程 |
+| 04 | `references/04-text-rendering.md` | 碰到 TEXT 节点时 |
+| 05 | `references/05-layout-modes.md` | 碰到任何 FRAME / SECTION / INSTANCE 时 |
+| 06 | `references/06-paint-effects.md` | 碰到 gradient / mask / shadow / blur 时 |
+| 07 | `references/07-tokens-and-vars.md` | 节点有 `variables.bound` 或需要 token 同步时 |
+| 08 | `references/08-route-escalation.md` | 命中 hard node 或 scorecard 不达标需要升级时 |
+| 09 | `references/09-verification.md` | Step 4 验收。scorecard 唯一来源 |
+| 10 | `references/10-bridge-env.md` | 遇到 bridge / plugin / cache 问题时 |
 
-在当前 skill 根目录执行：
+---
+
+## 强制流程（5 步，每步完成才能进下一步）
+
+### Step 1 — Bridge 提取
 
 ```bash
 node ./scripts/figma_pipeline.mjs "<figma-url>"
 ```
 
-- `NO_PLUGIN_CONNECTION` → **停止**，告知用户启动插件，**禁止静默降级到 MCP-only**
-- 输出 `cross-validation-report.json`，**HIGH 级警告必须在 Step 3 前处理**
-- 遇到插件导入、bridge 端口或依赖问题时，Read `./references/bridge/setup.md`
+产出 `cache/<fileKey>/<nodeId>/bridge-agent-payload.json`（已富集 computedCss 各字段）+ `baseline/baseline.png`（A8 plugin 导出）+ `cross-validation-report.json`。
 
-### Step 2: 节点审计（强制）
+- `NO_PLUGIN_CONNECTION` → **停止**，读 `10-bridge-env.md` 排查，**禁止**静默降级到 MCP-only
+- **HIGH 级**交叉校验警告必须在 Step 3 前处理（退回 `01-data-sources.md` 核对对应字段）
 
-**写代码前必须完成。** 遍历 bridge `designSnapshot.root` 所有节点，逐个检查：
+### Step 2 — 节点审计
 
-```
-对每个节点检查（visible 在节点根属性，opacity 在 style 下）：
-1. node.visible === false → 不渲染，标注 [HIDDEN]
-2. node.style.opacity === 0 → 不渲染，标注 [OPACITY=0]
-3. node.style.fills[].visible === false → 该 fill 不渲染
-4. node.style.strokes[].visible === false → 该 stroke 不渲染
-```
+遍历 `designSnapshot.root` 所有节点，输出审计表：
 
-**输出节点审计表**（在实现前展示给用户确认）：
 ```
 节点ID  名称         visible  opacity  渲染决定
 xxxx    播放按钮      true     0        不渲染 [OPACITY=0]
@@ -49,152 +56,58 @@ xxxx    分类标签      false    1        不渲染 [HIDDEN]
 xxxx    标题         true     1        渲染
 ```
 
-### Step 3: 写代码
+依据：`node.visible === false` → 不渲染；`node.style.opacity === 0` → 不渲染；`fills[].visible === false` → 该 fill 层不渲染。
 
-开始写代码前先按条件读取 reference：
+### Step 3 — 写代码
 
-- **必读：** `./references/common/css-rules.md`。这是 CSS/bridge 映射规则来源；未读取就开始写代码视为违规。
-- **遇到 hard node、route escalation、DOM/SVG/Canvas 选择时：** Read `./references/common/replay-system.md`
-- **需要查本地脚本、cache 产物和产物结构时：** Read `./references/bridge/workflow.md`
-- **要把 bridge 色值替换成消费方代码库的 CSS 变量或同步 token 时：** Read `./references/bridge/token-extraction.md`
+**前置（一次性）**：
+1. Read `02-css-reset.md` 把 reset 块复制到样式表顶部
+2. Read `03-node-to-html.md` 掌握七步算法
+3. 根据节点类型按需 Read 04-08
 
-#### node.css 可信 vs 不可信
+**每个节点按 `03-node-to-html.md` 的七步算法执行**。
 
-**可信（可直接用 node.css 值）：** `font-size`、`font-weight`、`color`（纯色）、`width`、`height`、`border-radius`（无渐变）、`line-height`、`padding`、`gap`
+**写代码时优先级（硬规定）**：
 
-**不可信（必须从 style.* 取值）：**
+1. `node.computedCss.full` / `node.computedHtml` 存在 → **直接贴，不再推理**
+2. `node.computedCss.<field>` 存在 → 直接映射到对应 CSS 属性
+3. `node.style.*` / `node.layout.*` / `node.text.*` 原始字段（按 `01-data-sources.md` 映射）
+4. `node.css.*` 仅在原始字段缺失且非「已知降级项」时参考
 
-| 属性 | node.css 问题 | 取值来源 |
-|------|-------------|---------|
-| `blur()` | **被除以 2** | `style.effects[].radius` 原值 1:1 |
-| `border`（渐变） | 降级为 solid | `style.strokes[]` gradientStops |
-| `background`（渐变） | stop 位置不准 / transform 漏算 | **`node.computedCss.background`**（pipeline 已算好），无此字段时从 `style.fills[]` 手算 |
-| `radial-gradient`（旋转节点） | 基于未旋转坐标系 | `node.computedCss.background` 或 `absoluteBoundingBox` + 矩阵映射 |
-| stroke z-order | 无法表达 | DOM 顺序：stroke 层在 fill/glow 之上 |
+**禁止**：猜测、从截图推断、凭组件名假设、手算可由 pipeline 产出的 CSS（gradient / token / positioning）。
 
-#### 节点到 HTML 映射规则（强制）
+### Step 4 — 验收
 
-**每个 bridge 节点必须有对应 HTML 元素，不得跳过任何中间 FRAME。** 即使只传递 padding/gap 的包装层也必须保留。
+**完整流程见 `09-verification.md`**。摘要：
 
-##### Layout 属性映射（无 node.css 的节点必须用 layout 字段构建）
+- **region-first**：先对修改区做 `--crop + --mode region`，过了再做 page
+- **大图保护**：baseline/candidate > 25M 像素禁止全图，必须 crop
+- **scorecard 命令**见 `09-verification.md`
+- 阈值：page（0.98 / 0.5% / ΔE p95 1.5）、region（0.985 / 0.2% / 1.0）、hard-node（0.99 / 0.1% / 0.8）
 
-| bridge 字段 | CSS 映射 |
-|-------------|---------|
-| `layoutMode: VERTICAL` | `display: flex; flex-direction: column` |
-| `layoutMode: HORIZONTAL` | `display: flex; flex-direction: row` |
-| `itemSpacing` | `gap` |
-| `paddingTop/Right/Bottom/Left` | `padding` |
-| `layoutSizingHorizontal: FILL` | `align-self: stretch` 或 `flex: 1 0 0` |
-| `layoutSizingHorizontal: FIXED` | 显式 `width` |
-| `layoutSizingHorizontal: HUG` | `width: auto` |
-| `layoutSizingVertical: FIXED` | 显式 `height` |
-| `layoutSizingVertical: HUG` | 不设高度（auto） |
-| `clipsContent: true` | `overflow: hidden` |
-| `clipsContent: false` | `overflow: visible` |
+无 baseline 不能宣称「已对齐」。scorecard 未跑 + 无视觉对照不能宣称「已验收」。
 
-##### 图片填充映射（严格）
+### Step 5 — Hard Gates 自查
 
-| bridge scaleMode | CSS 映射 |
-|-----------------|---------|
-| `FILL` | `background-size: cover` 或 `object-fit: cover` |
-| `FIT` | `background-size: contain` |
-| `CROP` | `background-size: 100% 100%` |
-
-- `imageTransform` 非单位矩阵时必须转为 CSS transform
-- 图片路径指向 `assets/{imageHash}.{format}`
-- `node.css.background` 中 `url(<path-to-image>)` 替换为实际路径
-
-##### SVG/Vector 节点（禁止占位符）
-
-- VECTOR/BOOLEAN_OPERATION 必须用 `node.vector.fillGeometry[].path` 生成 inline SVG
-- fill 颜色从 `node.css.fill` 或 `node.style.fills` 取
-- **禁止使用占位符、简化路径或从外部猜测 SVG**
-
-##### 绝对定位节点
-
-- `node.css.position: absolute` 的节点保留绝对定位
-- left/top 值从 css 取，父容器加 `position: relative`
-
-#### 写代码检查清单（逐项执行）
-
-1. **不可信属性从 style.* 取值，可信属性可用 node.css** — 不猜测、不从截图推断、不凭组件名假设
-1a. **渐变 background 强制用 `node.computedCss.background`**（pipeline 生成，含 gradientTransform 精算） — 节点存在该字段时不许手算或降级为 `node.css.background`
-1b. **Token 绑定强制输出 CSS 变量引用** — 节点若有 `node.computedCss.tokens[<css-prop>]`，CSS 该属性必须写 `var(<cssVar>)` 而非硬编码值。`variables-substitution-map.json` 提供多 mode 解析值；`inferred` 绑定仅参考，不强转。详见 `./references/bridge/token-extraction.md`
-2. **blur 值 1:1** — `style.effects[].radius: N` → CSS `blur(Npx)`，不用 node.css 的 /2 值
-3. **filter + blend-mode 禁止同元素** — 拆父子层
-4. **渐变色值禁止改 alpha**
-5. **复用组件前必须 Read 源码** — 对比 bridge SVG，不匹配则新建
-6. **CSS 变量替代色值前** — Read 变量定义确认值一致，否则写死 bridge 值
-7. **中文 12px 字号** — line-height 至少 16px（+2~4px 防截断）
-8. **物料组件默认透明背景**
-9. **富文本必须用 segment 链** — TEXT 节点 `text.segments[]` 有 ≥2 段异样样式时，逐段 `<span>`（或框架等价）渲染，不得仅按第一段整段渲染。详见 `./references/common/css-rules.md`「Styled text segments」。
-10. **层层偏差优先使用 `absoluteBoundingBox.width/height`** — 嵌套 FILL / stroke 场景出现 1-2px 误差时以 `absoluteBoundingBox` 为事实。`box-sizing: border-box` + `padding` + `border-width` 覆盖常规场景，`strokeAlign: INSIDE/CENTER/OUTSIDE` 见 css-rules「布局盒」。
-
-### Step 4: 验收（强制）
-
-**实现完成后必须执行，不可跳过。**
-
-#### 性能 Hard Gate（违反 = 禁止继续验收）
-
-1. **region-first**: 必须先对修改区域做 `--crop` + `--mode region` 验收；只有 region 收敛后才允许 page 级全图验证
-2. **大图保护**: 任一 baseline/candidate 超过 25M 像素（如 2560×10000）时，**禁止**直接跑全图 scorecard，必须先 `--crop` 裁到目标 section
-3. **early-exit**: 当 pixel_diff_ratio 远超阈值时，必须加 `--early-exit` 跳过 SSIM/DeltaE00 全量计算；先缩小区域再做精细验收
-4. **并发限制**: 大图验收、rerender、baseline 生成禁止多 entry 并行；单次只允许一个重型验收任务运行
-5. **大对象读取限制**: 默认只读 `bridge-agent-payload.json`、`cross-validation-report.json`、`merge-summary.md`；除非排查具体字段 bug，禁止把 `bridge-response.json` 或完整 `restSnapshot` 整包加载到上下文
-
-#### 验收命令
-
-在当前 skill 根目录执行：
-
-```bash
-# region-first: 先验收修改的 section（推荐）
-python3 ./scripts/fidelity_scorecard.py \
-  --baseline <baseline.png> \
-  --candidate <截图> --mode region \
-  --crop 0,<section_y>,<width>,<section_height>
-
-# 迭代调试时加 early-exit
-python3 ./scripts/fidelity_scorecard.py \
-  --baseline <baseline.png> \
-  --candidate <截图> --mode region \
-  --crop 0,<section_y>,<width>,<section_height> --early-exit
-
-# region 收敛后再跑 page 级（可选）
-python3 ./scripts/fidelity_scorecard.py \
-  --baseline <baseline.png> \
-  --candidate <截图> --mode page
-```
-
-如果没有 baseline（pipeline 对 GROUP 类型节点不生成），用 MCP screenshot 作为视觉对照，并说明未走自动 scorecard 的原因。无任何对照时不能宣称"已对齐"。
-
-详细阈值、rerender loop、输出格式和最终 done gate 见 `./references/common/acceptance.md`。这是详细验收的唯一来源。
-
-### Step 5: Hard Gates 自查
-
-**提交代码前逐条过检查清单。** 有任何一条未通过，回到对应 Step 修复。
+提交代码前逐条过，有未通过回对应 Step。
 
 ## Hard Gates（违反任一条 = 还原未完成）
 
 - [ ] Bridge 提取成功，未静默降级
-- [ ] 节点审计表已生成，HIDDEN/OPACITY=0 节点未渲染
-- [ ] cross-validation-report HIGH 警告已处理
-- [ ] 遇到 hard node 或升级路由时，已 Read `./references/common/replay-system.md`
-- [ ] 如有 token 替代或主题同步，已 Read `./references/bridge/token-extraction.md`
-- [ ] 已按 `./references/common/acceptance.md` 跑完 scorecard / done gate，并说明通过项、失败项、未验收项、已知偏差
-- [ ] 验收走 region-first 顺序：先 crop + region 收敛，再可选 page 级验证
-- [ ] 大图（>25M 像素）未直接跑全图 scorecard，已使用 --crop
-- [ ] 未把 bridge-response.json / restSnapshot 整包加载到上下文
-- [ ] 如需定位 cache、merge 产物或脚本入口，已 Read `./references/bridge/workflow.md`
-
-## References
-
-- `./references/common/css-rules.md`：实现前必读。只包含 CSS/bridge 映射规则，不承担详细验收职责。
-- `./references/common/replay-system.md`：遇到 route selection、hard signal、升级链路时读取。
-- `./references/common/acceptance.md`：详细验收唯一来源，包含阈值、manifest、rerender loop 和最终输出要求。
-- `./references/bridge/workflow.md`：本地脚本速查、cache 产物、bridge 工作流。
-- `./references/bridge/setup.md`：bridge / ws_defs 插件安装、依赖和环境变量。
-- `./references/bridge/token-extraction.md`：变量同步、token 替代和 merge 优先级。
+- [ ] 节点审计表已生成，HIDDEN / OPACITY=0 节点未渲染
+- [ ] cross-validation-report 的 HIGH 警告已处理
+- [ ] 代码最顶部有 `02-css-reset.md` 的 reset 块
+- [ ] 所有 `computedCss.full` / `computedHtml` 存在的节点直接贴，没回头手算
+- [ ] 所有 `layoutMode: NONE` 的 FRAME 用了 absolute 定位，子节点按 `absoluteBoundingBox.x/y` 排序
+- [ ] 所有 TEXT 的 segments ≥2 段拆了 span
+- [ ] 所有 GRADIENT fill 用 `computedCss.background`
+- [ ] 所有 token 绑定输出 `var(--xxx)` 而非硬编码
+- [ ] hard node 已升级到 SVG / Canvas / Raster 之一（见 `08-route-escalation.md`）
+- [ ] 已按 `09-verification.md` 跑 scorecard，region 收敛后再做 page 级
+- [ ] 验收报告列明：通过项 / 失败项 / 未验收项 / 已知偏差
+- [ ] 大图（>25M 像素）未直接跑全图 scorecard
+- [ ] 未把 `bridge-response.json` / 完整 `restSnapshot` 整包加载到上下文
 
 ## 环境
 
-依赖安装、bridge 端口和插件导入见 `./references/bridge/setup.md`。
+依赖安装、bridge 端口、插件导入、cache 产物路径全部见 `references/10-bridge-env.md`。

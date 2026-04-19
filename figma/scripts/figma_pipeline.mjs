@@ -20,6 +20,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { gradientPaintToCss } from './lib/gradient_to_css.mjs';
 import { enrichNodeTokens, buildSubstitutionMap } from './lib/variable_substitution.mjs';
+import { enrichComputedCss as enrichFullComputedCss } from './lib/computed_css.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -498,6 +499,13 @@ async function main() {
         `\n[1.9/5] 变量绑定: ${tokens.nodesEnriched} 个节点挂载 computedCss.tokens，` +
           `variables-substitution-map.json 含 ${tokens.variablesMapped} 条`
       );
+    }
+    // Step 1.10: aggregate full computedCss + computedHtml per node so the
+    // agent can consume values directly without re-deriving layout/appearance.
+    const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root);
+    if (fullEnriched > 0) {
+      fs.writeFileSync(payloadPath, JSON.stringify(agentPayload, null, 2));
+      console.log(`\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml`);
     }
   }
   mergeCache(resolvedUrl);
