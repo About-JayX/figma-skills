@@ -9,7 +9,11 @@ const SVG_FALLBACK_PAINT_TYPES = {
 const DEFAULT_EXTRACTION_OPTIONS = {
   cssConcurrency: 6,
   cssTimeoutMs: 1200,
-  svgConcurrency: 1,
+  // C5: SVG extraction was previously serialized (concurrency=1). exportAsync
+  // is IO-bound inside the plugin sandbox and benefits from parallelism. Four
+  // concurrent exports keep peak memory well under the 2 GB sandbox ceiling
+  // for typical pages; raise further only after memory monitoring is in place.
+  svgConcurrency: 4,
   svgTimeoutMs: 4000,
   imageConcurrency: 4,
   imageTimeoutMs: 2000,
