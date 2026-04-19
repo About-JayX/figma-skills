@@ -275,6 +275,8 @@ def compute_ssim(a_rgb: np.ndarray, b_rgb: np.ndarray) -> float:
     b = srgb_to_linear(b_rgb)
     a_gray = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
     b_gray = 0.2126 * b[..., 0] + 0.7152 * b[..., 1] + 0.0722 * b[..., 2]
+    del a, b  # free ~600 MB of linear-RGB arrays before uniform_filter allocates intermediates
+    gc.collect()
 
     if uniform_filter is None:
         ux = float(a_gray.mean())
@@ -316,11 +318,8 @@ def deterministic_stride(total: int, max_samples: int) -> int:
 
 
 
-def compute_delta_e_metrics(a_rgb: np.ndarray, b_rgb: np.ndarray, max_samples: int) -> Dict[str, float]:
-    h, w = a_rgb.shape[:2]
-    stride = deterministic_stride(h * w, max_samples)
-    a_sub = a_rgb[::stride, ::stride]
-    b_sub = b_rgb[::stride, ::stride]
+def _compute_delta_e_from_samples(a_sub: np.ndarray, b_sub: np.ndarray, stride: int) -> Dict[str, float]:
+    """Compute DeltaE00 metrics from already-subsampled RGB arrays."""
     lab_a = rgb_to_lab(a_sub)
     lab_b = rgb_to_lab(b_sub)
     delta = ciede2000(lab_a, lab_b).reshape(-1)
@@ -332,6 +331,15 @@ def compute_delta_e_metrics(a_rgb: np.ndarray, b_rgb: np.ndarray, max_samples: i
         "max": float(delta.max(initial=0.0)),
         "mean": float(delta.mean()),
     }
+
+
+
+def compute_delta_e_metrics(a_rgb: np.ndarray, b_rgb: np.ndarray, max_samples: int) -> Dict[str, float]:
+    h, w = a_rgb.shape[:2]
+    stride = deterministic_stride(h * w, max_samples)
+    a_sub = a_rgb[::stride, ::stride]
+    b_sub = b_rgb[::stride, ::stride]
+    return _compute_delta_e_from_samples(a_sub, b_sub, stride)
 
 
 
@@ -564,10 +572,21 @@ def _generate_report_locked(
         del baseline, candidate
         gc.collect()
 
+        # Pre-extract tiny DeltaE subsamples (a few MB) before SSIM peak.
+        # This lets us free the full-res float32 arrays (~600 MB) right after
+        # SSIM instead of keeping them alive through the DeltaE call.
+        _h, _w = baseline_rgb.shape[:2]
+        _stride = deterministic_stride(_h * _w, max_color_samples)
+        baseline_sub = baseline_rgb[::_stride, ::_stride].copy()
+        candidate_sub = candidate_rgb[::_stride, ::_stride].copy()
+
         ssim = compute_ssim(baseline_rgb, candidate_rgb)
-        delta_e00 = compute_delta_e_metrics(baseline_rgb, candidate_rgb, max_color_samples)
         lpips_result = maybe_compute_lpips(lpips, baseline_rgb, candidate_rgb)
-        del baseline_rgb, candidate_rgb
+        del baseline_rgb, candidate_rgb  # free ~600 MB before DeltaE
+        gc.collect()
+
+        delta_e00 = _compute_delta_e_from_samples(baseline_sub, candidate_sub, _stride)
+        del baseline_sub, candidate_sub
         gc.collect()
 
     metrics: Dict[str, Any] = {

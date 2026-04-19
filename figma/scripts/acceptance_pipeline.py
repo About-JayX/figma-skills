@@ -11,6 +11,8 @@ The pipeline does four things:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import gc
 import json
 import shutil
 import sys
@@ -99,7 +101,50 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not create the final zip package",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of parallel scorecard workers (default: 1). "
+            "Each worker peaks at ~1.5 GB RAM; set to 2-4 based on available memory. "
+            "Workers share the same process so numpy GIL-free ops run truly in parallel."
+        ),
+    )
     return parser.parse_args()
+
+
+
+def _process_entry(
+    entry: Any,
+    report_dir: Path,
+    heatmap_dir: Path,
+    bundle_dir: Path,
+    pixel_threshold: int,
+    max_color_samples: int,
+    lpips: bool,
+    max_pixels: int,
+) -> Dict[str, Any]:
+    """Run scorecard + build plan for a single entry. Thread-safe: all state is local."""
+    entry_slug = slugify(entry.entry_id)
+    report_path = report_dir / f"{entry_slug}.fidelity.json"
+    heatmap_path = heatmap_dir / f"{entry_slug}.heatmap.png"
+    report = generate_report(
+        baseline_path=entry.baseline,
+        candidate_path=entry.candidate,
+        mode=entry.mode,
+        pixel_threshold=pixel_threshold,
+        report_path=report_path,
+        heatmap_path=heatmap_path,
+        lpips=lpips,
+        max_color_samples=max_color_samples,
+        early_exit=True,
+        max_pixels=max_pixels,
+    )
+    entry_plan = build_entry_plan(entry, report)
+    copy_entry_images(bundle_dir, entry_plan, report)
+    gc.collect()
+    return entry_plan
 
 
 
@@ -214,25 +259,21 @@ def main() -> int:
         heatmap_dir.mkdir(parents=True, exist_ok=True)
 
         iteration_entry_plans: List[Dict[str, Any]] = []
-        for entry in target_entries:
-            entry_slug = slugify(entry.entry_id)
-            report_path = report_dir / f"{entry_slug}.fidelity.json"
-            heatmap_path = heatmap_dir / f"{entry_slug}.heatmap.png"
-            report = generate_report(
-                baseline_path=entry.baseline,
-                candidate_path=entry.candidate,
-                mode=entry.mode,
-                pixel_threshold=args.pixel_threshold,
-                report_path=report_path,
-                heatmap_path=heatmap_path,
-                lpips=args.lpips,
-                max_color_samples=args.max_color_samples,
-                early_exit=True,
-                max_pixels=25_000_000,
-            )
-            entry_plan = build_entry_plan(entry, report)
-            iteration_entry_plans.append(entry_plan)
-            copy_entry_images(bundle_dir, entry_plan, report)
+        _workers = max(1, args.workers)
+        _entry_kwargs: Dict[str, Any] = dict(
+            report_dir=report_dir,
+            heatmap_dir=heatmap_dir,
+            bundle_dir=bundle_dir,
+            pixel_threshold=args.pixel_threshold,
+            max_color_samples=args.max_color_samples,
+            lpips=args.lpips,
+            max_pixels=25_000_000,
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_workers) as _pool:
+            # Submit all entries; preserve order by iterating futures in submission order.
+            _futures = [_pool.submit(_process_entry, entry, **_entry_kwargs) for entry in target_entries]
+            for _fut in _futures:
+                iteration_entry_plans.append(_fut.result())
 
         if iteration == 1 or not args.rerun_failed_only:
             all_entry_plans = iteration_entry_plans

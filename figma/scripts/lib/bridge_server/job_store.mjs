@@ -80,6 +80,11 @@ export function getPrimaryPluginClient(state, fileKey) {
   if (fileKey) {
     const matched = clients.filter((c) => c.fileKey === fileKey);
     if (matched.length > 0) return { client: matched[matched.length - 1], ambiguous: false, mismatch: false };
+    // If exactly one client exists and it has no registered fileKey, allow fallback
+    const unregistered = clients.filter((c) => !c.fileKey);
+    if (clients.length === 1 && unregistered.length === 1) {
+      return { client: clients[0], ambiguous: false, mismatch: false };
+    }
     return { client: null, ambiguous: false, mismatch: true };
   }
 
