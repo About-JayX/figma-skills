@@ -19,6 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { gradientPaintToCss } from './lib/gradient_to_css.mjs';
+import { enrichNodeTokens, buildSubstitutionMap } from './lib/variable_substitution.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,6 +119,47 @@ function enrichComputedCss(data, cacheDir, payloadPath) {
     fs.writeFileSync(payloadPath, JSON.stringify(data, null, 2));
   }
   return enriched;
+}
+
+// === Step 1.9: Inject token refs + write substitution map ===
+//
+// defs.full (with per-mode resolved values) is intentionally stripped from
+// bridge-agent-payload.json to keep that file small. Read it from the larger
+// bridge-response.json for the substitution map — we do not carry the giant
+// file into agent context afterwards.
+function readDefsFullFromResponse(cacheDir) {
+  const responsePath = path.join(cacheDir, 'bridge-response.json');
+  if (!fs.existsSync(responsePath)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    return raw?.defs?.full || null;
+  } catch {
+    return null;
+  }
+}
+
+function enrichTokens(data, cacheDir, payloadPath) {
+  const root = data?.designSnapshot?.root;
+  if (!root) return { nodesEnriched: 0, variablesMapped: 0 };
+
+  const nodesEnriched = enrichNodeTokens(root);
+
+  const defsFull = readDefsFullFromResponse(cacheDir);
+  const substitution = buildSubstitutionMap(defsFull);
+  const variablesMapped = Object.keys(substitution).length;
+
+  if (variablesMapped > 0) {
+    fs.writeFileSync(
+      path.join(cacheDir, 'variables-substitution-map.json'),
+      JSON.stringify(substitution, null, 2)
+    );
+  }
+
+  if (nodesEnriched > 0) {
+    fs.writeFileSync(payloadPath, JSON.stringify(data, null, 2));
+  }
+
+  return { nodesEnriched, variablesMapped };
 }
 
 // === Step 2: Merge cache ===
@@ -431,6 +473,13 @@ async function main() {
     const enriched = enrichComputedCss(agentPayload, cacheDir, payloadPath);
     if (enriched > 0) {
       console.log(`\n[1.8/5] 渐变 CSS 已计算: ${enriched} 个节点挂载 computedCss.background`);
+    }
+    const tokens = enrichTokens(agentPayload, cacheDir, payloadPath);
+    if (tokens.nodesEnriched > 0 || tokens.variablesMapped > 0) {
+      console.log(
+        `\n[1.9/5] 变量绑定: ${tokens.nodesEnriched} 个节点挂载 computedCss.tokens，` +
+          `variables-substitution-map.json 含 ${tokens.variablesMapped} 条`
+      );
     }
   }
   mergeCache(resolvedUrl);

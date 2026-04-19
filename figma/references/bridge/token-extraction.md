@@ -37,6 +37,26 @@
 - `variable-defs.json`
 - `merged-agent-payload.json`
 - `merge-summary.md`
+- `variables-substitution-map.json`：pipeline 生成的 Figma 变量名 → CSS 变量名 + 多 mode 值映射表（`buildSubstitutionMap`，`scripts/lib/variable_substitution.mjs`）
+
+## computedCss.tokens 字段
+
+pipeline Step 1.9 会遍历 `designSnapshot.root`，把 `node.variables.bound` 转为 `node.computedCss.tokens`：
+
+```json
+"computedCss": {
+  "tokens": {
+    "color":       { "cssVar": "--color-neutrals-950", "figmaProp": "fills", "variable": {"name": "Color/neutrals/950", "id": "...", "type": "COLOR"} },
+    "font-size":   { "cssVar": "--font-size-text-xs",  "figmaProp": "fontSize", ... },
+    "line-height": { "cssVar": "--line-height-text-xs","figmaProp": "lineHeight", ... }
+  }
+}
+```
+
+- **Figma 属性 → CSS 属性** 通过 `FIGMA_PROP_TO_CSS` 映射（fills→color, itemSpacing→gap, topLeftRadius→border-top-left-radius 等）。未知属性保留原名。
+- **CSS 变量命名** 保留 CJK 字符：`Color/neutrals/950` → `--color-neutrals-950`，`间距参数/SP0` → `--间距参数-sp0`。
+- 节点存在该字段时，**CSS 必须输出 `var(--xxx)` 而非硬编码值**；多 mode 回放时用 `variables-substitution-map.json[figmaName].values[modeName]` 查解析值做 fallback。
+- `inferred`（Figma 猜测的变量）不进 tokens，只作信息参考，不能强转。
 
 ## 推荐流程
 

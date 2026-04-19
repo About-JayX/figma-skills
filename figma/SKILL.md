@@ -119,6 +119,7 @@ xxxx    标题         true     1        渲染
 
 1. **不可信属性从 style.* 取值，可信属性可用 node.css** — 不猜测、不从截图推断、不凭组件名假设
 1a. **渐变 background 强制用 `node.computedCss.background`**（pipeline 生成，含 gradientTransform 精算） — 节点存在该字段时不许手算或降级为 `node.css.background`
+1b. **Token 绑定强制输出 CSS 变量引用** — 节点若有 `node.computedCss.tokens[<css-prop>]`，CSS 该属性必须写 `var(<cssVar>)` 而非硬编码值。`variables-substitution-map.json` 提供多 mode 解析值；`inferred` 绑定仅参考，不强转。详见 `./references/bridge/token-extraction.md`
 2. **blur 值 1:1** — `style.effects[].radius: N` → CSS `blur(Npx)`，不用 node.css 的 /2 值
 3. **filter + blend-mode 禁止同元素** — 拆父子层
 4. **渐变色值禁止改 alpha**
