@@ -19,7 +19,9 @@
 `filter: blur()` 和 `mix-blend-mode` 禁止同元素。filter 创建隔离层叠上下文，blend 目标会变。拆成父子两层：外层 blend，内层 blur。
 
 ### [自动] gradientTransform
-渐变有 `gradientTransform` 时，`gradientStops[].position` 是变换前的值 ≠ 渲染位置。交叉参考 `node.css` 百分比值，同时 `fills[].opacity` 要乘入终止色 alpha。
+渐变有 `gradientTransform` 时，`gradientStops[].position` 是变换前的值 ≠ 渲染位置。**pipeline 已在有渐变 fill 的节点挂 `node.computedCss.background`（由 `scripts/lib/gradient_to_css.mjs` 精算，含矩阵反演 + CSS 角度换算 + paint.opacity 合并到 stop alpha）。必须直接使用该字段，不要信 `node.css.background` 或手算。**
+
+无 `computedCss.background` 时才回退到手算：交叉参考 `node.css` 百分比值，`fills[].opacity` 要乘入终止色 alpha。
 
 ### [自动] 旋转节点
 `relativeTransform` 非单位矩阵时，`layout.width` 是原始尺寸，`absoluteBoundingBox` 是旋转后包围盒。`node.css` 的 `radial-gradient` 参数基于未旋转坐标系，不能直接用在 abs 尺寸上。渐变中心需通过矩阵映射计算。

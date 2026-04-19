@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { gradientPaintToCss } from './lib/gradient_to_css.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,40 @@ function fetchDeferredAssets(url, data) {
     }
   }
   console.log(`  合计: 成功 ${ok}, 失败 ${fail}`);
+}
+
+// === Step 1.8: Inject computed gradient CSS per node ===
+function enrichComputedCss(data, cacheDir, payloadPath) {
+  const root = data?.designSnapshot?.root;
+  if (!root) return 0;
+
+  let enriched = 0;
+
+  function walk(node) {
+    const fills = node?.style?.fills;
+    if (Array.isArray(fills) && fills.some((f) => f?.type?.startsWith('GRADIENT_'))) {
+      const box = node?.layout?.absoluteBoundingBox || null;
+      const gradientPaints = fills.filter((f) => f?.type?.startsWith('GRADIENT_') && f.visible !== false);
+      const layers = [];
+      for (let i = gradientPaints.length - 1; i >= 0; i -= 1) {
+        const css = gradientPaintToCss(gradientPaints[i], box);
+        if (css) layers.push(css);
+      }
+      if (layers.length > 0) {
+        node.computedCss = node.computedCss || {};
+        node.computedCss.background = layers.join(', ');
+        enriched += 1;
+      }
+    }
+    for (const child of node.children || []) walk(child);
+  }
+
+  walk(root);
+
+  if (enriched > 0) {
+    fs.writeFileSync(payloadPath, JSON.stringify(data, null, 2));
+  }
+  return enriched;
 }
 
 // === Step 2: Merge cache ===
@@ -392,6 +427,12 @@ async function main() {
     : null;
 
   fetchDeferredAssets(resolvedUrl, agentPayload);
+  if (agentPayload) {
+    const enriched = enrichComputedCss(agentPayload, cacheDir, payloadPath);
+    if (enriched > 0) {
+      console.log(`\n[1.8/5] 渐变 CSS 已计算: ${enriched} 个节点挂载 computedCss.background`);
+    }
+  }
   mergeCache(resolvedUrl);
   const warnings = crossValidate(cacheDir, agentPayload);
   const baselinePath = generateBaseline(cacheDir, agentPayload);

@@ -68,8 +68,8 @@ xxxx    标题         true     1        渲染
 |------|-------------|---------|
 | `blur()` | **被除以 2** | `style.effects[].radius` 原值 1:1 |
 | `border`（渐变） | 降级为 solid | `style.strokes[]` gradientStops |
-| `background`（渐变含 transform） | stop 位置不准 | `style.fills[]` + gradientTransform |
-| `radial-gradient`（旋转节点） | 基于未旋转坐标系 | `absoluteBoundingBox` + 矩阵映射 |
+| `background`（渐变） | stop 位置不准 / transform 漏算 | **`node.computedCss.background`**（pipeline 已算好），无此字段时从 `style.fills[]` 手算 |
+| `radial-gradient`（旋转节点） | 基于未旋转坐标系 | `node.computedCss.background` 或 `absoluteBoundingBox` + 矩阵映射 |
 | stroke z-order | 无法表达 | DOM 顺序：stroke 层在 fill/glow 之上 |
 
 #### 节点到 HTML 映射规则（强制）
@@ -118,6 +118,7 @@ xxxx    标题         true     1        渲染
 #### 写代码检查清单（逐项执行）
 
 1. **不可信属性从 style.* 取值，可信属性可用 node.css** — 不猜测、不从截图推断、不凭组件名假设
+1a. **渐变 background 强制用 `node.computedCss.background`**（pipeline 生成，含 gradientTransform 精算） — 节点存在该字段时不许手算或降级为 `node.css.background`
 2. **blur 值 1:1** — `style.effects[].radius: N` → CSS `blur(Npx)`，不用 node.css 的 /2 值
 3. **filter + blend-mode 禁止同元素** — 拆父子层
 4. **渐变色值禁止改 alpha**
