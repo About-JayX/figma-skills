@@ -457,10 +457,42 @@ function summary(agentResult, warnings, baselinePath) {
 }
 
 // === Main ===
+async function runDownstream(cacheDir) {
+  const out = path.join(SKILL_ROOT, '..', '..', 'output', path.basename(cacheDir));
+  console.log(`\n[6/7] codegen (render-ready → mechanical React project)…`);
+  const codegenRes = spawnSync(process.execPath, [
+    path.join(SCRIPTS, 'codegen_pipeline.mjs'),
+    cacheDir,
+    out,
+    '--project-name',
+    `gen-${path.basename(cacheDir)}`,
+  ], { stdio: 'inherit' });
+  if (codegenRes.status !== 0) {
+    console.error('  ✗ codegen failed');
+    return;
+  }
+  console.log(`\n[7/7] verify_loop (vite + screenshot + lint + scorecard)…`);
+  const verifyRes = spawnSync(process.execPath, [
+    path.join(SCRIPTS, 'verify_loop.mjs'),
+    '--cache',
+    cacheDir,
+    '--project',
+    out,
+    '--install',
+  ], { stdio: 'inherit' });
+  if (verifyRes.status !== 0) {
+    console.log('  ⚠ verify reported issues — see _verify/ under cache dir');
+  }
+}
+
 async function main() {
-  const url = process.argv.slice(2).join(' ').trim();
+  const argv = process.argv.slice(2);
+  const flags = new Set(argv.filter((a) => a.startsWith('--')));
+  const url = argv.filter((a) => !a.startsWith('--')).join(' ').trim();
+  const auto = flags.has('--auto') || flags.has('--codegen');
   if (!url) {
-    console.log('用法: node ./scripts/figma_pipeline.mjs "<figma-url-or-node-id>"');
+    console.log('用法: node ./scripts/figma_pipeline.mjs [--auto] "<figma-url-or-node-id>"');
+    console.log('  --auto   extract + render_ready + codegen + verify_loop 一条龙');
     process.exit(1);
   }
 
@@ -528,6 +560,10 @@ async function main() {
   const baselinePath = generateBaseline(cacheDir, agentPayload);
   summary(agentResult, warnings, baselinePath);
   agentPayload = null; // release for GC
+
+  if (auto) {
+    await runDownstream(cacheDir);
+  }
 }
 
 main().catch(e => {

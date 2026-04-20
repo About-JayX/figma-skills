@@ -226,7 +226,7 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
     throw createPluginError('IMAGE_BYTES_EMPTY', '图片字节为空: ' + imageHash);
   }
 
-  if (bytes.length > mergedOptions.assetMaxBytes) {
+  if (mergedOptions.assetMaxBytes && bytes.length > mergedOptions.assetMaxBytes) {
     throw createPluginError(
       'IMAGE_TOO_LARGE',
       '图片字节超出上限: ' + bytes.length + ' > ' + mergedOptions.assetMaxBytes,
