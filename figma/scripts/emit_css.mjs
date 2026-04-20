@@ -8,12 +8,52 @@
 import fs from 'fs';
 import path from 'path';
 
-const RESET = `/* reset */
+function detectThemeFromRoot(renderReady) {
+  const root = renderReady.nodes.find((n) => n.id === renderReady.rootId);
+  if (!root) return { dark: false, bg: '#fff', color: '#000' };
+  // Root explicit bg takes priority
+  if (root.style?.bg) {
+    const h = root.style.bg.toLowerCase().replace('#', '');
+    if (h.length >= 6) {
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const brightness = (r + g + b) / 3;
+      return brightness < 128
+        ? { dark: true, bg: root.style.bg, color: '#fff' }
+        : { dark: false, bg: root.style.bg, color: '#000' };
+    }
+  }
+  // Heuristic — sample first 5 descendants with bg and see if most are dark
+  let dark = 0, light = 0;
+  for (const n of renderReady.nodes) {
+    const bg = n.style?.bg;
+    if (!bg) continue;
+    const h = bg.toLowerCase().replace('#', '');
+    if (h.length < 6) continue;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if (Number.isNaN(r)) continue;
+    const brightness = (r + g + b) / 3;
+    if (brightness < 128) dark++;
+    else light++;
+    if (dark + light >= 10) break;
+  }
+  return dark > light
+    ? { dark: true, bg: '#000', color: '#fff' }
+    : { dark: false, bg: '#fff', color: '#000' };
+}
+
+function buildReset(theme) {
+  return `/* reset */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { background: #fff; color: #000; font-family: system-ui, sans-serif; }
+html, body { background: ${theme.bg}; color: ${theme.color}; font-family: system-ui, sans-serif; }
+body { display: flex; justify-content: center; }
 img { display: block; }
 
 `;
+}
 
 // B2 — Google Fonts allowlist. Families here get an @import at the top of App.css.
 // Expand this set as new designs introduce new families (safe — unknown families simply
@@ -254,7 +294,8 @@ function emitCss(renderReady) {
     rules.push(rule);
   }
   const fontImports = buildFontImports(renderReady);
-  return fontImports + RESET + rules.join('\n\n') + '\n';
+  const theme = detectThemeFromRoot(renderReady);
+  return fontImports + buildReset(theme) + rules.join('\n\n') + '\n';
 }
 
 function main() {

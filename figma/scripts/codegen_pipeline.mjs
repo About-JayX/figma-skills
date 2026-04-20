@@ -60,6 +60,59 @@ function emit(cache, outSrc) {
   runNode('emit_css.mjs', [rr, path.join(outSrc, 'App.css')]);
 }
 
+// VIDEO-fill placeholders: Figma exports no video frame; we crop the corresponding
+// region from baseline.png and use that as a static placeholder. Pure best-effort —
+// writes a PNG per video node into src/assets and patches renderReady's image.path.
+function cropVideoPlaceholders(cache, outSrc) {
+  const rrPath = path.join(cache, 'render-ready.json');
+  const baselinePath = path.join(cache, 'baseline', 'baseline.png');
+  if (!fs.existsSync(rrPath) || !fs.existsSync(baselinePath)) return 0;
+  const rr = JSON.parse(fs.readFileSync(rrPath, 'utf8'));
+  const videos = rr.nodes.filter((n) => n.image?.kind === 'video');
+  if (videos.length === 0) return 0;
+  const root = rr.nodes.find((n) => n.id === rr.rootId);
+  if (!root) return 0;
+  const rootAbsX = root.box?.absX ?? 0;
+  const rootAbsY = root.box?.absY ?? 0;
+  const assetsDir = path.join(outSrc, 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
+  // Use python+PIL — cheap, no extra JS deps.
+  const script = `
+import sys, json
+from PIL import Image
+base = Image.open(${JSON.stringify(baselinePath)})
+videos = ${JSON.stringify(
+    videos.map((n) => ({
+      id: n.id,
+      dx: (n.box.absX ?? 0) - rootAbsX,
+      dy: (n.box.absY ?? 0) - rootAbsY,
+      w: n.box.width,
+      h: n.box.height,
+    }))
+  )}
+for v in videos:
+    x0, y0 = int(v['dx']*2), int(v['dy']*2)
+    x1, y1 = int((v['dx']+v['w'])*2), int((v['dy']+v['h'])*2)
+    out = f'${assetsDir}/videoframe_' + v['id'].replace(':','-').replace(';','-') + '.png'
+    base.crop((x0, y0, x1, y1)).save(out)
+    print(v['id'], out)
+`;
+  const res = spawnSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' });
+  if (res.status !== 0) {
+    console.warn('[codegen] video placeholder crop failed:', res.stderr);
+    return 0;
+  }
+  // Patch renderReady image paths for video nodes
+  for (const v of videos) {
+    const outName = `videoframe_${v.id.replace(/:/g, '-').replace(/;/g, '-')}.png`;
+    v.image.path = `./assets/${outName}`;
+    v.image.fallbackColor = null;
+  }
+  fs.writeFileSync(rrPath, JSON.stringify(rr, null, 2));
+  console.log(`[codegen] ${videos.length} video placeholders cropped from baseline`);
+  return videos.length;
+}
+
 function copyAssets(cache, outSrc, outRoot) {
   console.log('[3/4] copy assets + svgs…');
   // Images go to src/assets (imported via ES modules, bundled by Vite).
@@ -151,6 +204,7 @@ function main() {
   fs.mkdirSync(outSrc, { recursive: true });
 
   ensureRenderReady(args.cache);
+  cropVideoPlaceholders(args.cache, outSrc);
   emit(args.cache, outSrc);
   copyAssets(args.cache, outSrc, args.out);
   scaffoldVite(args.out, args.projectName);

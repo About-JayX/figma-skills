@@ -272,6 +272,49 @@ function indexSvgs(cacheDir) {
   return idx;
 }
 
+function hexBrightness(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const h = hex.toLowerCase().replace('#', '');
+  if (h.length < 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if ([r, g, b].some(Number.isNaN)) return null;
+  return (r + g + b) / 3;
+}
+
+// Post-processing pass: walk the flat tree and, for any container whose bg is #ffffff
+// (Figma's "default white") and whose nearest ancestor with a concrete bg is dark,
+// strip the white bg. Figma designers often leave frame fills as #fff in dark-theme
+// designs (meaning "transparent in rendering context"); when we emit them as CSS
+// background-color they create huge white blocks that override the dark design.
+function stripFalseWhiteUnderDark(flat) {
+  const byId = new Map(flat.map((n) => [n.id, n]));
+  let stripped = 0;
+  for (const n of flat) {
+    const bg = n.style?.bg;
+    if (!bg || !['#ffffff', '#fff'].includes(bg.toLowerCase())) continue;
+    // Don't touch leaf-ish roles — images/text/vectors may genuinely want their bg.
+    if (n.role !== 'container') continue;
+    let pid = n.parentId;
+    while (pid) {
+      const p = byId.get(pid);
+      if (!p) break;
+      const pbg = p.style?.bg;
+      if (pbg) {
+        const brightness = hexBrightness(pbg);
+        if (brightness != null && brightness < 128) {
+          n.style.bg = null;
+          stripped++;
+        }
+        break;
+      }
+      pid = p.parentId;
+    }
+  }
+  return stripped;
+}
+
 function buildRenderReady(root, assetsIndex, svgIndex) {
   const flat = [];
   const skipped = [];
@@ -299,8 +342,10 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
     const role = (() => {
       if (node.type === 'TEXT') return 'text';
       if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') return 'vector';
-      const hasImg = (style.fills || []).some((p) => p?.visible !== false && p?.type === 'IMAGE');
-      if (hasImg) return 'image';
+      const hasMedia = (style.fills || []).some(
+        (p) => p?.visible !== false && (p?.type === 'IMAGE' || p?.type === 'VIDEO')
+      );
+      if (hasMedia) return 'image';
       return 'container';
     })();
 
@@ -390,7 +435,10 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
     for (const c of kids) visit(c, node.id);
   })(root, null);
 
-  return { flat, skipped };
+  // Post-pass — dark-theme awareness
+  const strippedWhite = stripFalseWhiteUnderDark(flat);
+
+  return { flat, skipped, strippedWhite };
 }
 
 // ────────────── main ──────────────
