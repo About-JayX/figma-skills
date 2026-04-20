@@ -34,11 +34,25 @@ function shouldCollectCssForNode(node) {
   );
 }
 
+// L1.4: pure-container types are positioned with DOM/CSS via their children's
+// own SVG/CSS treatment. Exporting SVG for them produces a flattened raster
+// of the entire subtree (including base64-embedded raster fills) — wasted
+// 7MB+ blobs that no consumer reads (skeleton generator routes children-first).
+const SVG_EXPORT_EXCLUDE_CONTAINER_TYPES = {
+  FRAME: true,
+  SECTION: true,
+  GROUP: true,
+  COMPONENT: true,
+  COMPONENT_SET: true,
+  INSTANCE: true,
+};
+
 function shouldExportSvgForNode(node) {
   if (!node || typeof node.exportAsync !== 'function') {
     return false;
   }
 
+  // Hard-signal short-circuit: these REQUIRE SVG regardless of container status.
   if (node.type === 'BOOLEAN_OPERATION' || node.type === 'TEXT_PATH') {
     return true;
   }
@@ -72,6 +86,11 @@ function shouldExportSvgForNode(node) {
     if (node.vectorPaths.length > 1) {
       return true;
     }
+  }
+
+  // L1.4: pure containers fall through unless they hit a hard signal above.
+  if (SVG_EXPORT_EXCLUDE_CONTAINER_TYPES[node.type]) {
+    return false;
   }
 
   return (
