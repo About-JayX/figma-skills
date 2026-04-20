@@ -83,15 +83,17 @@ export const ASSET_MAX_BYTES = parsePositiveInteger(
   'FIGMA_BRIDGE_ASSET_MAX_BYTES'
 );
 
+// Defaults sized so large Figma designs (1500+ nodes → 100MB+ JSON) don't hit ceilings.
+// 2GB effectively means "unbounded for all practical inputs"; override via env var if needed.
 export const BLOB_MAX_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_BLOB_MAX_BYTES,
-  128 * 1024 * 1024,
+  2 * 1024 * 1024 * 1024,
   'FIGMA_BRIDGE_BLOB_MAX_BYTES'
 );
 
 export const JSON_BODY_MAX_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_JSON_BODY_MAX_BYTES,
-  32 * 1024 * 1024,
+  2 * 1024 * 1024 * 1024,
   'FIGMA_BRIDGE_JSON_BODY_MAX_BYTES'
 );
 
@@ -109,7 +111,7 @@ export const RESULT_CHUNK_MAX_BYTES = parsePositiveInteger(
 
 export const RESULT_CHUNK_MAX_TOTAL_BYTES = parsePositiveInteger(
   process.env.FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES,
-  50 * 1024 * 1024,
+  2 * 1024 * 1024 * 1024,
   'FIGMA_BRIDGE_RESULT_CHUNK_MAX_TOTAL_BYTES'
 );
 

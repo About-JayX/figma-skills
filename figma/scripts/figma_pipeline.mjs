@@ -29,7 +29,8 @@ const SKILL_ROOT = path.resolve(__dirname, '..');
 
 function run(cmd, opts = {}) {
   try {
-    return execSync(cmd, { encoding: 'utf-8', timeout: 180000, maxBuffer: 50 * 1024 * 1024, cwd: path.resolve(SKILL_ROOT, '../..'), ...opts }).trim();
+    // maxBuffer: large Figma files can yield 100MB+ bridge JSON; 500MB gives headroom.
+    return execSync(cmd, { encoding: 'utf-8', timeout: 600000, maxBuffer: 500 * 1024 * 1024, cwd: path.resolve(SKILL_ROOT, '../..'), ...opts }).trim();
   } catch (e) {
     return null;
   }

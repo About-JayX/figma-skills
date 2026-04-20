@@ -21,8 +21,8 @@ const DEFAULT_EXTRACTION_OPTIONS = {
   assetMaxBytes: 0,
   assetMaxPixels: 0,
   includeInvisibleInstanceChildren: true,
-  restTimeoutMs: 5000,
-  restMaxBytes: 3000000,
+  restTimeoutMs: 60000,
+  restMaxBytes: 0,
   uploadSvgBlobs: true,
 };
 

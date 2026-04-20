@@ -65,17 +65,31 @@ function extractImagePaint(paints, assetsIndex) {
   if (!Array.isArray(paints)) return null;
   for (const p of paints) {
     if (p?.visible === false) continue;
-    if (p?.type !== 'IMAGE') continue;
-    const hash = p.imageHash;
-    if (!hash) continue;
-    const asset = assetsIndex.get(hash);
-    return {
-      hash,
-      path: asset ? `./assets/${asset.file}` : null,
-      fallbackColor: null,
-      scaleMode: p.scaleMode || 'FILL',
-      opacity: p.opacity ?? 1,
-    };
+    if (p?.type === 'IMAGE' && p.imageHash) {
+      const asset = assetsIndex.get(p.imageHash);
+      return {
+        hash: p.imageHash,
+        path: asset ? `./assets/${asset.file}` : null,
+        fallbackColor: null,
+        scaleMode: p.scaleMode || 'FILL',
+        opacity: p.opacity ?? 1,
+        kind: 'image',
+      };
+    }
+    if (p?.type === 'VIDEO' && p.videoHash) {
+      // Figma VIDEO fills can't be reproduced in static HTML without exporting a still
+      // frame. Record it so downstream knows to render a dark placeholder (similar tone
+      // to the video's first frame — chosen empirically dark since most videos in dark
+      // designs start with dark content).
+      return {
+        hash: p.videoHash,
+        path: null,
+        fallbackColor: '#1a1a1a',
+        scaleMode: p.scaleMode || 'CROP',
+        opacity: p.opacity ?? 1,
+        kind: 'video',
+      };
+    }
   }
   return null;
 }
@@ -185,10 +199,18 @@ function buildTextRun(node, parsedCss) {
   // computedCss.full to pull typography. Bridge's computed CSS is the closest thing to
   // "what Figma actually rendered".
   if (segs.length === 0) {
+    // fontSize fallback — computedCss.full sometimes omits it; derive from box.height
+    // assuming single-line (height ≈ lineHeight ≈ 1.4 × fontSize) when height is small.
+    let fontSize = parsePx(parsedCss['font-size']) || null;
+    if (!fontSize && typeof node.layout?.height === 'number') {
+      const h = node.layout.height;
+      // Only derive for plausibly single-line text; multi-line boxes usually have correct font-size.
+      if (h >= 10 && h <= 200) fontSize = Math.round(h / 1.2);
+    }
     return {
       content,
       fontFamily: unquoteFontFamily(parsedCss['font-family']) || null,
-      fontSize: parsePx(parsedCss['font-size']) || null,
+      fontSize,
       fontWeight: parsedCss['font-weight'] || null,
       lineHeight: parsedCss['line-height'] || null,
       letterSpacing: parsedCss['letter-spacing'] || null,

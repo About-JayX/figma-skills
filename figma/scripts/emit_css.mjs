@@ -149,7 +149,18 @@ function emitRule(node, parentNode) {
   // Colors / border / radius / shadow
   // Skip bg for vector role — the SVG <img> has its own fill baked in; a bg color
   // only bleeds through transparent areas of the SVG and gives the "black square" artifact.
-  if (node.style.bg && node.role !== 'vector') decls.push(['background-color', node.style.bg]);
+  //
+  // Skip bg for text role — render_ready puts fills color into style.bg, but TEXT fills
+  // are the *foreground* text color (handled below via node.text.color). Emitting it as
+  // background-color makes every text span render as a colored rectangle.
+  if (node.style.bg && node.role !== 'vector' && node.role !== 'text') {
+    decls.push(['background-color', node.style.bg]);
+  }
+  // Image role with no resolvable path (VIDEO fills, or missing image asset):
+  // emit fallbackColor so the area isn't blank/default white.
+  if (node.role === 'image' && !node.image?.path && node.image?.fallbackColor) {
+    decls.push(['background-color', node.image.fallbackColor]);
+  }
   if (node.style.borderColor) {
     const perSide = node.style.borderWidths;
     if (perSide) {
@@ -188,7 +199,12 @@ function emitRule(node, parentNode) {
     if (node.text.fontWeight) decls.push(['font-weight', node.text.fontWeight]);
     if (node.text.lineHeight) decls.push(['line-height', node.text.lineHeight]);
     if (node.text.letterSpacing) decls.push(['letter-spacing', node.text.letterSpacing]);
-    if (node.text.color) decls.push(['color', node.text.color]);
+    // Skip emitting #000 color so text inherits from body (which can be #fff on dark designs).
+    // Figma sometimes exports "color: #000000" for text that visually renders white due to
+    // component-instance inversion or parent blend modes — inheriting is safer than hard-setting black.
+    if (node.text.color && node.text.color.toLowerCase() !== '#000000' && node.text.color !== '#000') {
+      decls.push(['color', node.text.color]);
+    }
     if (node.text.textAlign) decls.push(['text-align', node.text.textAlign]);
     // Single-line heuristic: Figma stores width exactly fitting one line; browser font
     // metrics diverge slightly, so text can wrap unexpectedly (e.g. "How-to" at the hyphen).

@@ -36,7 +36,7 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
     var snapshotBytes = estimateJsonBytes(snapshot);
     diagnostics.bytes = snapshotBytes != null ? snapshotBytes : JSON.stringify(snapshot).length;
 
-    if (diagnostics.bytes > mergedOptions.restMaxBytes) {
+    if (mergedOptions.restMaxBytes && diagnostics.bytes > mergedOptions.restMaxBytes) {
       diagnostics.truncated = true;
       if (reportStage) {
         reportStage.ok('extract.rest.done', 'REST 快照提取完成', diagnostics);
