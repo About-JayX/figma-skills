@@ -167,19 +167,29 @@ function emitRule(node, parentNode, indexById) {
   const isParentRow = parentNode?.flex?.direction === 'row';
   const emitWidth = !(flexMainFill && isParentRow);
   const emitHeight = !(flexMainFill && !isParentRow);
-  // For TEXT nodes: Figma pre-measures text in its own font engine and stores the
-  // resulting width as node.box.width. Browsers with the same font family+size
-  // produce slightly different metrics — setting an explicit CSS width causes the
-  // last few characters to be clipped by parent overflow (common: buttons losing
-  // trailing letters). Use min-width instead so text drives the final size naturally.
+  // Width strategy
+  //   - TEXT: don't emit width. Let the inline span size to its natural content;
+  //     the flex-row parent arranges siblings.
+  //   - sizingH='HUG': use min-width so the container grows for text descendants.
+  //   - Everyone else: fixed width.
   //
-  // Same treatment for containers marked sizingH='HUG' in Figma — these are meant
-  // to auto-size to fit their content, not be constrained. If we emit fixed width
-  // they cascade-clip whatever expands inside (usually text).
-  const isHugWidth = node.role === 'text' || node.sizingH === 'HUG';
+  // Also: FIXED-width flex containers must clip overflow. Otherwise HUG-chain
+  // descendants (whose text rendered wider than Figma's measure) spill past the
+  // FIXED boundary and into sibling gaps.
   if (emitWidth && node.box.width != null) {
-    if (isHugWidth) decls.push(['min-width', px(node.box.width)]);
-    else decls.push(['width', px(node.box.width)]);
+    if (node.role === 'text') {
+      // skip — natural sizing
+    } else if (node.sizingH === 'HUG') {
+      decls.push(['min-width', px(node.box.width)]);
+    } else {
+      decls.push(['width', px(node.box.width)]);
+      // Only row-flex containers need clipping: overflow from a row child lands
+      // in the sibling gap (or next sibling). Column flex's cross-axis overflow
+      // combined with align-items:flex-end would clip the WRONG side — skip.
+      if (node.flex && node.flex.direction === 'row') {
+        decls.push(['overflow', 'hidden']);
+      }
+    }
   }
   if (emitHeight && node.box.height != null) decls.push(['height', px(node.box.height)]);
 
