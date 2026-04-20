@@ -512,10 +512,15 @@ async function main() {
         assetFiles = mf.assetFiles || {};
       } catch {}
     }
-    const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root, { assetFiles });
+    const ccCtx = { assetFiles };
+    const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root, ccCtx);
     if (fullEnriched > 0) {
       fs.writeFileSync(payloadPath, JSON.stringify(agentPayload, null, 2));
-      console.log(`\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml`);
+      const inlined = ccCtx.inlinedSvgs || 0;
+      console.log(
+        `\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml` +
+        (inlined > 0 ? `（其中 ${inlined} 个 SVG 已 inline）` : '')
+      );
     }
   }
   mergeCache(resolvedUrl);

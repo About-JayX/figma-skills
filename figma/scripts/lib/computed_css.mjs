@@ -10,12 +10,24 @@
 //                                → { mode, flexDirection?, justifyContent?,
 //                                    alignItems?, flexWrap?, position?, left?,
 //                                    top?, transform? }
-//   buildNodeAppearance(node, precomputedGradient)
+//   buildNodeAppearance(node, precomputedGradient, ctx)
 //                                → { background?, borderRadius?, opacity?,
 //                                    filter?, backdropFilter?, boxShadow?, ... }
 //   buildFullCss(node, ...)      → one inline CSS string
 //   buildTextHtml(node)          → '<span>...</span><span style="color:#...">...' or null
-//   enrichComputedCss(root)      → walks tree, mutates nodes with computedCss / computedHtml
+//   maybeInlineSvgRef(node, ctx) → reads small svgRef blob from disk and
+//                                  attaches to node.computedHtml; large
+//                                  blobs left as svgRef for downstream
+//   enrichComputedCss(root, ctx) → walks tree, mutates nodes with computedCss / computedHtml
+
+import fs from 'fs';
+
+// L1.2: blobs below this size go inline as computedHtml so the agent never
+// needs a separate file read. Above this, svgRef is preserved and consumers
+// reference via <img> / <object> / fetch. 4KB chosen as the elbow on
+// distribution measured on real designs (small icons cluster well below 4KB,
+// rasterized vectors live well above).
+const SVG_INLINE_MAX_BYTES = 4 * 1024;
 
 const FLEX_ALIGN_PRIMARY = {
   MIN: 'flex-start',
@@ -434,9 +446,34 @@ export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
 
 // ===== Tree walker =====
 
+// L1.2: small SVG blobs get pulled into computedHtml so consumers never
+// need a separate file read. The svgRef field is removed for inlined blobs.
+// Returns true if inlined.
+export function maybeInlineSvgRef(node, ctx) {
+  const ref = node?.svgRef;
+  if (!ref || !ref.localPath) return false;
+  const limit = ctx?.svgInlineMaxBytes ?? SVG_INLINE_MAX_BYTES;
+  // Trust the metadata's byteLength when present to avoid an extra stat();
+  // fall back to fs.statSync only when missing.
+  let bytes = typeof ref.byteLength === 'number' ? ref.byteLength : null;
+  if (bytes == null) {
+    try { bytes = fs.statSync(ref.localPath).size; }
+    catch { return false; }
+  }
+  if (bytes >= limit) return false;
+  let svgString;
+  try { svgString = fs.readFileSync(ref.localPath, 'utf-8'); }
+  catch { return false; }
+  if (!svgString || svgString.length === 0) return false;
+  node.computedHtml = svgString;
+  delete node.svgRef;
+  return true;
+}
+
 export function enrichComputedCss(root, ctx) {
   if (!root) return 0;
   let count = 0;
+  let inlinedSvgs = 0;
   function walk(node, parentLayout) {
     node.computedCss = node.computedCss || {};
     const preGradient = node.computedCss.background || null;
@@ -456,6 +493,14 @@ export function enrichComputedCss(root, ctx) {
     if (node.type === 'TEXT') {
       const html = buildTextHtml(node);
       if (html) node.computedHtml = html;
+      // TEXT nodes occasionally carry an svgRef (Figma exports a glyph-outline
+      // SVG for some text). Agent should consume segments via computedHtml; the
+      // SVG would not be selectable text. Drop the svgRef to remove the
+      // redundant signal so consumers don't get confused.
+      if (node.svgRef) delete node.svgRef;
+    } else if (node.svgRef) {
+      // Vector / boolean-op / etc — try inline if small enough.
+      if (maybeInlineSvgRef(node, ctx)) inlinedSvgs += 1;
     }
 
     if (Object.keys(node.computedCss).length === 0) delete node.computedCss;
@@ -463,5 +508,6 @@ export function enrichComputedCss(root, ctx) {
     for (const child of node.children || []) walk(child, node.layout);
   }
   walk(root, null);
+  if (ctx) ctx.inlinedSvgs = inlinedSvgs;
   return count;
 }

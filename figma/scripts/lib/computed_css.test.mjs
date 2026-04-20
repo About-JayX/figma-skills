@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   buildNodeBox,
   buildNodePositioning,
@@ -7,6 +10,7 @@ import {
   buildFullCss,
   buildTextHtml,
   buildTextDefaults,
+  maybeInlineSvgRef,
   enrichComputedCss,
 } from './computed_css.mjs';
 
@@ -296,6 +300,90 @@ test('enrichComputedCss: walks tree, attaches computedCss + computedHtml', () =>
   assert.ok(count >= 2);
   assert.ok(root.computedCss.full.includes('display: flex'));
   assert.equal(root.children[0].computedHtml, '<span>Hi</span>');
+});
+
+test('maybeInlineSvgRef: small blob inlined, svgRef removed', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svg-'));
+  const blobPath = path.join(tmp, 'icon.svg');
+  const small = '<svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg>';
+  fs.writeFileSync(blobPath, small);
+  const node = { svgRef: { localPath: blobPath, byteLength: small.length } };
+  const inlined = maybeInlineSvgRef(node, {});
+  assert.equal(inlined, true);
+  assert.equal(node.computedHtml, small);
+  assert.equal(node.svgRef, undefined);
+  fs.rmSync(tmp, { recursive: true });
+});
+
+test('maybeInlineSvgRef: large blob preserved as svgRef', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svg-'));
+  const blobPath = path.join(tmp, 'big.svg');
+  const big = '<svg>' + 'x'.repeat(5000) + '</svg>';
+  fs.writeFileSync(blobPath, big);
+  const node = { svgRef: { localPath: blobPath, byteLength: big.length } };
+  const inlined = maybeInlineSvgRef(node, {});
+  assert.equal(inlined, false);
+  assert.equal(node.computedHtml, undefined);
+  assert.ok(node.svgRef);
+  fs.rmSync(tmp, { recursive: true });
+});
+
+test('maybeInlineSvgRef: missing file returns false (non-fatal)', () => {
+  const node = { svgRef: { localPath: '/nonexistent/path.svg', byteLength: 100 } };
+  const inlined = maybeInlineSvgRef(node, {});
+  assert.equal(inlined, false);
+  assert.ok(node.svgRef);
+});
+
+test('maybeInlineSvgRef: custom svgInlineMaxBytes via ctx', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svg-'));
+  const blobPath = path.join(tmp, 'mid.svg');
+  const mid = '<svg>' + 'x'.repeat(2000) + '</svg>';
+  fs.writeFileSync(blobPath, mid);
+  // Default 4KB threshold would inline this; raise threshold to 1KB → not inlined
+  const node = { svgRef: { localPath: blobPath, byteLength: mid.length } };
+  const inlined = maybeInlineSvgRef(node, { svgInlineMaxBytes: 1024 });
+  assert.equal(inlined, false);
+  fs.rmSync(tmp, { recursive: true });
+});
+
+test('enrichComputedCss: TEXT nodes with svgRef get svgRef stripped (computedHtml supersedes)', () => {
+  const root = {
+    id: 'r', type: 'FRAME', layout: { layoutMode: 'VERTICAL' }, style: {},
+    children: [
+      {
+        id: 't', type: 'TEXT', layout: {}, style: {},
+        text: { characters: 'Hi', segments: [{ characters: 'Hi', fills: [{ color: { hex: '#000' } }] }] },
+        svgRef: { localPath: '/some/path.svg', byteLength: 500 },
+      },
+    ],
+  };
+  enrichComputedCss(root, {});
+  assert.equal(root.children[0].svgRef, undefined);
+  assert.equal(root.children[0].computedHtml, '<span>Hi</span>');
+});
+
+test('enrichComputedCss: walks tree and inlines small svgRefs only', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svg-'));
+  const smallPath = path.join(tmp, 'a.svg');
+  const bigPath = path.join(tmp, 'b.svg');
+  fs.writeFileSync(smallPath, '<svg/>');
+  fs.writeFileSync(bigPath, '<svg>' + 'x'.repeat(5000) + '</svg>');
+  const root = {
+    id: 'r', type: 'FRAME', layout: { layoutMode: 'VERTICAL' }, style: {},
+    children: [
+      { id: 'a', type: 'VECTOR', layout: {}, style: {}, svgRef: { localPath: smallPath, byteLength: 6 } },
+      { id: 'b', type: 'VECTOR', layout: {}, style: {}, svgRef: { localPath: bigPath, byteLength: 5012 } },
+    ],
+  };
+  const ctx = {};
+  enrichComputedCss(root, ctx);
+  assert.equal(root.children[0].computedHtml, '<svg/>');
+  assert.equal(root.children[0].svgRef, undefined);
+  assert.equal(root.children[1].computedHtml, undefined);
+  assert.ok(root.children[1].svgRef);
+  assert.equal(ctx.inlinedSvgs, 1);
+  fs.rmSync(tmp, { recursive: true });
 });
 
 test('enrichComputedCss: NONE parent → child gets absolute positioning', () => {
