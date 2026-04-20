@@ -3,6 +3,7 @@ import path from 'path';
 
 import { CACHE_ROOT } from './bridge_config.mjs';
 import { writeJsonFile, writeJsonFileStreaming } from './bridge_http.mjs';
+import { sniffImageFormat, formatToExtension } from './image_format.mjs';
 
 export function sanitizePathPart(value) {
   return String(value || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '-');
@@ -66,7 +67,21 @@ export function upsertAssetMetadata(cacheDir, assetMetadata) {
   const assetsDir = path.join(cacheDir, 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
 
-  const extension = normalizeAssetExtension(assetMetadata);
+  // L1.1: when the upstream caller didn't provide a format / mimeType,
+  // sniff it from the actual bytes. The previous fallback chain ended at
+  // 'bin' for any image whose plugin metadata wasn't filled in, which
+  // produced bridge-side .bin files and downstream URLs guessed wrong.
+  let resolvedFormat = assetMetadata.format;
+  if ((!resolvedFormat || normalizeAssetExtension(assetMetadata) === 'bin')
+      && Buffer.isBuffer(assetMetadata.bytes)) {
+    const sniffed = sniffImageFormat(assetMetadata.bytes);
+    if (sniffed && sniffed !== 'bin') {
+      resolvedFormat = sniffed;
+    }
+  }
+  const extension = formatToExtension(resolvedFormat) === 'bin'
+    ? normalizeAssetExtension(assetMetadata)
+    : formatToExtension(resolvedFormat);
   const fileName = `${sanitizePathPart(assetMetadata.imageHash)}.${extension}`;
   const filePath = path.join(assetsDir, fileName);
 
@@ -79,7 +94,7 @@ export function upsertAssetMetadata(cacheDir, assetMetadata) {
     fileName,
     relativePath: path.relative(cacheDir, filePath),
     localPath: filePath,
-    format: assetMetadata.format || null,
+    format: resolvedFormat || null,
     mimeType: assetMetadata.mimeType || null,
     width: typeof assetMetadata.width === 'number' ? assetMetadata.width : null,
     height: typeof assetMetadata.height === 'number' ? assetMetadata.height : null,

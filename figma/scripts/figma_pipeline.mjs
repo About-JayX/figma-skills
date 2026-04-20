@@ -502,7 +502,17 @@ async function main() {
     }
     // Step 1.10: aggregate full computedCss + computedHtml per node so the
     // agent can consume values directly without re-deriving layout/appearance.
-    const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root);
+    // Pass cache-manifest assetFiles so IMAGE fills resolve to real fileName
+    // (correct sniffed extension) instead of guessing .png.
+    const manifestPath = path.join(cacheDir, 'cache-manifest.json');
+    let assetFiles = {};
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const mf = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        assetFiles = mf.assetFiles || {};
+      } catch {}
+    }
+    const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root, { assetFiles });
     if (fullEnriched > 0) {
       fs.writeFileSync(payloadPath, JSON.stringify(agentPayload, null, 2));
       console.log(`\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml`);

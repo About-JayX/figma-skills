@@ -179,7 +179,7 @@ function resolvePositioningMode(layout, parentLayout) {
 
 // ===== Appearance =====
 
-export function buildNodeAppearance(node, precomputedGradient) {
+export function buildNodeAppearance(node, precomputedGradient, ctx) {
   if (!node) return null;
   const style = node.style || {};
   const a = {};
@@ -188,7 +188,7 @@ export function buildNodeAppearance(node, precomputedGradient) {
   if (precomputedGradient) {
     a.background = precomputedGradient;
   } else if (Array.isArray(style.fills)) {
-    const bg = firstFillToBackground(style.fills);
+    const bg = firstFillToBackground(style.fills, ctx);
     if (bg) Object.assign(a, bg);
   }
 
@@ -273,18 +273,22 @@ export function buildNodeAppearance(node, precomputedGradient) {
   return Object.keys(a).length > 0 ? a : null;
 }
 
-function firstFillToBackground(fills) {
+function firstFillToBackground(fills, ctx) {
   for (const fill of fills) {
     if (!fill || fill.visible === false) continue;
     if (fill.type === 'SOLID') {
       return { backgroundColor: hexToRgba(fill.color, fill.opacity ?? 1) };
     }
     if (fill.type === 'IMAGE' && fill.imageHash) {
-      const ext = fill.format || 'png';
+      // L1.1: prefer the real fileName from cache-manifest (sniffed format),
+      // fall back to fill.format / 'png' only if manifest lookup misses.
+      const manifestEntry = ctx?.assetFiles?.[fill.imageHash];
+      const fileName = manifestEntry?.fileName
+        || `${fill.imageHash}.${fill.format || 'png'}`;
       const scaleMode = fill.scaleMode || 'FILL';
       const sizeMap = { FILL: 'cover', FIT: 'contain', CROP: '100% 100%', TILE: 'auto' };
       return {
-        backgroundImage: `url('./assets/${fill.imageHash}.${ext}')`,
+        backgroundImage: `url('./assets/${fileName}')`,
         backgroundSize: sizeMap[scaleMode] || 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: scaleMode === 'TILE' ? 'repeat' : 'no-repeat',
@@ -389,11 +393,11 @@ export function buildTextDefaults(node) {
 
 // ===== Full CSS (aggregated inline style string) =====
 
-export function buildFullCss(node, parentLayout, precomputedGradient) {
+export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
   const parts = {};
   const box = buildNodeBox(node.layout);
   const pos = buildNodePositioning(node.layout, parentLayout);
-  const app = buildNodeAppearance(node, precomputedGradient);
+  const app = buildNodeAppearance(node, precomputedGradient, ctx);
   const textDef = buildTextDefaults(node);
 
   if (pos) {
@@ -430,7 +434,7 @@ export function buildFullCss(node, parentLayout, precomputedGradient) {
 
 // ===== Tree walker =====
 
-export function enrichComputedCss(root) {
+export function enrichComputedCss(root, ctx) {
   if (!root) return 0;
   let count = 0;
   function walk(node, parentLayout) {
@@ -441,9 +445,9 @@ export function enrichComputedCss(root) {
     if (box) node.computedCss.box = box;
     const pos = buildNodePositioning(node.layout, parentLayout);
     if (pos) node.computedCss.positioning = pos;
-    const app = buildNodeAppearance(node, preGradient);
+    const app = buildNodeAppearance(node, preGradient, ctx);
     if (app) node.computedCss.appearance = app;
-    const full = buildFullCss(node, parentLayout, preGradient);
+    const full = buildFullCss(node, parentLayout, preGradient, ctx);
     if (full) {
       node.computedCss.full = full;
       count += 1;

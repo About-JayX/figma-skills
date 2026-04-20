@@ -17,8 +17,10 @@ import {
   ensureCacheDirForResult,
   materializeEmbeddedImageAssets,
   persistBridgeResult as persistBridgeResultV4,
+  upsertAssetMetadata,
 } from './lib/bridge_cache.mjs';
 import { parseTarget } from './lib/bridge_target.mjs';
+import { sniffImageFormat } from './lib/image_format.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -294,20 +296,31 @@ async function runAssetFetch(targetInput, imageHash) {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('octet-stream')) {
       const buffer = Buffer.from(await response.arrayBuffer());
-      const ext = (response.headers.get('x-image-format') || 'png').toLowerCase();
-      const safeHash = imageHash.replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `${safeHash}.${ext}`;
-      const filePath = path.join(assetsDir, fileName);
-      fs.writeFileSync(filePath, buffer);
+      // L1.1: prefer magic-byte sniff over the X-Image-Format header — header
+      // can be missing or wrong when the plugin couldn't determine format.
+      const sniffedFormat = sniffImageFormat(buffer);
+      const headerFormat = (response.headers.get('x-image-format') || '').toLowerCase();
+      const resolvedFormat = sniffedFormat !== 'bin' ? sniffedFormat : (headerFormat || 'png');
+
+      // Route through upsertAssetMetadata so cache-manifest.assetFiles[hash]
+      // gets a real entry — without this, downstream computed_css can't
+      // resolve the correct fileName and falls back to .png defaults.
+      const metadata = upsertAssetMetadata(cacheDir, {
+        imageHash,
+        format: resolvedFormat,
+        bytes: buffer,
+        byteLength: buffer.length,
+      });
 
       return {
         ok: true,
         startedBridge: ensured.startedBridge,
         target,
         assetsDir,
-        filePath,
-        fileName,
+        filePath: metadata?.localPath || null,
+        fileName: metadata?.fileName || null,
         byteLength: buffer.length,
+        format: resolvedFormat,
       };
     }
 

@@ -58,11 +58,28 @@ test('buildNodeAppearance: solid fill', () => {
   assert.equal(a.backgroundColor, '#e9ecff');
 });
 
-test('buildNodeAppearance: image fill with hash', () => {
+test('buildNodeAppearance: image fill with hash, no manifest → fallback to fill.format', () => {
   const node = { style: { fills: [{ type: 'IMAGE', visible: true, imageHash: 'abc123', scaleMode: 'FILL', format: 'png' }] } };
   const a = buildNodeAppearance(node, null);
   assert.equal(a.backgroundImage, "url('./assets/abc123.png')");
   assert.equal(a.backgroundSize, 'cover');
+});
+
+test('buildNodeAppearance: image fill prefers manifest fileName (real sniffed extension)', () => {
+  // Real-world case: bridge gives no fill.format; cache-manifest knows the
+  // actual file is a .jpg from magic-byte sniffing.
+  const node = { style: { fills: [{ type: 'IMAGE', visible: true, imageHash: 'jpghash', scaleMode: 'FILL' }] } };
+  const ctx = { assetFiles: { jpghash: { fileName: 'jpghash.jpg' } } };
+  const a = buildNodeAppearance(node, null, ctx);
+  assert.equal(a.backgroundImage, "url('./assets/jpghash.jpg')");
+});
+
+test('buildNodeAppearance: image fill manifest miss falls back to .png default', () => {
+  const node = { style: { fills: [{ type: 'IMAGE', visible: true, imageHash: 'unknown', scaleMode: 'FIT' }] } };
+  const ctx = { assetFiles: {} };
+  const a = buildNodeAppearance(node, null, ctx);
+  assert.equal(a.backgroundImage, "url('./assets/unknown.png')");
+  assert.equal(a.backgroundSize, 'contain');
 });
 
 test('buildNodeAppearance: precomputedGradient wins', () => {
