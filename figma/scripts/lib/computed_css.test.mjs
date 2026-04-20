@@ -41,6 +41,36 @@ test('buildNodePositioning: VERTICAL flex', () => {
   assert.equal(p.alignItems, 'flex-start');
 });
 
+test('buildNodePositioning: layoutPositioning ABSOLUTE wins over parent layoutMode', () => {
+  const parent = {
+    layoutMode: 'VERTICAL',
+    absoluteBoundingBox: { x: 0, y: 0, width: 1280, height: 2907 },
+  };
+  const child = {
+    layoutPositioning: 'ABSOLUTE',
+    layoutMode: 'HORIZONTAL',  // its OWN children would be flex-row
+    absoluteBoundingBox: { x: 0, y: 0, width: 1280, height: 81 },
+  };
+  const p = buildNodePositioning(child, parent);
+  // Even though parent is VERTICAL flex, this child opts out → absolute
+  assert.equal(p.mode, 'absolute-child');
+  assert.equal(p.position, 'absolute');
+  assert.equal(p.left, '0px');
+  assert.equal(p.top, '0px');
+});
+
+test('buildFullCss: parent gets position:relative when any child has layoutPositioning ABSOLUTE', () => {
+  const node = {
+    layout: { layoutMode: 'VERTICAL', absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 } },
+    style: {},
+    children: [
+      { layout: { layoutPositioning: 'ABSOLUTE', absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 20 } } },
+    ],
+  };
+  const css = buildFullCss(node, null, null, {});
+  assert.match(css, /position: relative/);
+});
+
 test('buildNodePositioning: absolute child of NONE parent', () => {
   const parent = {
     layoutMode: 'NONE',
@@ -56,10 +86,29 @@ test('buildNodePositioning: absolute child of NONE parent', () => {
   assert.equal(p.top, '-1px');
 });
 
-test('buildNodeAppearance: solid fill', () => {
-  const node = { style: { fills: [{ type: 'SOLID', visible: true, color: { r: 0.914, g: 0.925, b: 1, a: 1, hex: '#e9ecff' } }] } };
+test('buildNodeAppearance: solid fill on FRAME → backgroundColor', () => {
+  const node = { type: 'FRAME', style: { fills: [{ type: 'SOLID', visible: true, color: { r: 0.914, g: 0.925, b: 1, a: 1, hex: '#e9ecff' } }] } };
   const a = buildNodeAppearance(node, null);
   assert.equal(a.backgroundColor, '#e9ecff');
+});
+
+test('buildNodeAppearance: TEXT style.fills do NOT become backgroundColor (text color goes to buildTextDefaults)', () => {
+  const node = { type: 'TEXT', style: { fills: [{ type: 'SOLID', visible: true, color: { hex: '#000000' } }] } };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a, null);
+});
+
+test('buildNodeAppearance: VECTOR style.fills do NOT become backgroundColor (SVG paints itself)', () => {
+  const node = { type: 'VECTOR', style: { fills: [{ type: 'SOLID', visible: true, color: { hex: '#000000' } }] } };
+  const a = buildNodeAppearance(node, null);
+  assert.equal(a, null);
+});
+
+test('buildNodeAppearance: BOOLEAN_OPERATION/STAR/POLYGON/LINE same as VECTOR (no background)', () => {
+  for (const type of ['BOOLEAN_OPERATION', 'STAR', 'POLYGON', 'LINE']) {
+    const node = { type, style: { fills: [{ type: 'SOLID', visible: true, color: { hex: '#ff0' } }] } };
+    assert.equal(buildNodeAppearance(node, null), null, `${type} should not get backgroundColor`);
+  }
 });
 
 test('buildNodeAppearance: image fill with hash, no manifest → fallback to fill.format', () => {

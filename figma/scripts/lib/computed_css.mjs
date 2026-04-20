@@ -180,6 +180,12 @@ export function buildNodePositioning(layout, parentLayout) {
 }
 
 function resolvePositioningMode(layout, parentLayout) {
+  // Figma's per-child opt-out of auto-layout: child becomes absolute
+  // regardless of parent's layoutMode (think of an overlay nav inside a
+  // VERTICAL flex). This MUST be checked before flex-row/column dispatch
+  // because the layoutMode field on the node itself is for ITS children,
+  // not for how IT is positioned in its parent.
+  if (layout.layoutPositioning === 'ABSOLUTE') return 'absolute-child';
   if (layout.gridRowCount || layout.gridColumnCount) return 'grid';
   if (layout.layoutMode === 'VERTICAL') return 'flex-column';
   if (layout.layoutMode === 'HORIZONTAL') return 'flex-row';
@@ -197,9 +203,23 @@ export function buildNodeAppearance(node, precomputedGradient, ctx) {
   const a = {};
 
   // Background: first priority precomputed gradient; then first visible solid / image fill.
+  // Several types are NOT containers — their style.fills means something else:
+  //   TEXT      → text color (handled by buildTextDefaults as `color`)
+  //   VECTOR/BOOLEAN_OPERATION/STAR/POLYGON/LINE → SVG path fill (already
+  //              painted inside the inline <svg>; emitting backgroundColor
+  //              on the wrapper would create a redundant colored rect)
+  // Skip background emission for these node types.
+  const skipFillAsBackground = (
+    node.type === 'TEXT' ||
+    node.type === 'VECTOR' ||
+    node.type === 'BOOLEAN_OPERATION' ||
+    node.type === 'STAR' ||
+    node.type === 'POLYGON' ||
+    node.type === 'LINE'
+  );
   if (precomputedGradient) {
     a.background = precomputedGradient;
-  } else if (Array.isArray(style.fills)) {
+  } else if (!skipFillAsBackground && Array.isArray(style.fills)) {
     const bg = firstFillToBackground(style.fills, ctx);
     if (bg) Object.assign(a, bg);
   }
@@ -425,8 +445,13 @@ export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
     if (pos.top) parts.top = pos.top;
     if (pos.transform) parts.transform = pos.transform;
   }
-  // Parent must be position:relative when it has absolute children — consumer handles.
-  if (node.layout?.layoutMode === 'NONE' && Array.isArray(node.children) && node.children.length > 0) {
+  // Parent must be position:relative when ANY child opts out of auto-layout
+  // (layoutPositioning: ABSOLUTE) OR when this node uses NONE layoutMode
+  // (so its children are positioned by absoluteBoundingBox deltas).
+  const hasAbsoluteChild = Array.isArray(node.children) &&
+    node.children.some((c) => c?.layout?.layoutPositioning === 'ABSOLUTE');
+  if ((node.layout?.layoutMode === 'NONE' || hasAbsoluteChild) &&
+      Array.isArray(node.children) && node.children.length > 0) {
     parts.position = parts.position || 'relative';
   }
   if (box) {

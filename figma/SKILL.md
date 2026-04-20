@@ -60,14 +60,35 @@ xxxx    标题         true     1        渲染
 
 ### Step 3 — 写代码
 
-**前置（一次性）**：
-1. Read `02-css-reset.md` 把 reset 块复制到样式表顶部
+#### Step 3a — 直接生成（首选，零翻译）
+
+如果消费方是 React / HTML / 任何能跑 Web 的环境：
+
+```bash
+node ./scripts/generate_skeleton.mjs <cache-dir> --target react --out output/skeleton.jsx
+```
+
+产出 `output/skeleton.jsx`：完整的 React 组件，每个 Figma 节点都有对应的 JSX 元素 + 精算的 inline style + 正确的图片/SVG 引用。
+
+agent 只需要做：
+1. **重命名组件**（默认按 root.name 自动转 PascalCase；按需改）
+2. **加语义标签**（`<div data-fig-name="Nav">` → `<nav>`，data-fig-id 已留作反查标记）
+3. **接交互**（onClick / hover / 状态）
+4. 把 generator 输出的 `RESET_CSS` + `FONTS_HREF` 接入消费方的全局样式 / `<head>`
+5. 把 `cache/<key>/assets/` 复制或符号链接到消费方的 public 目录
+
+**禁止**：再去逐节点翻译 bridge 字段、手算 CSS、改 generator 已经给的 inline style。generator 已经吃掉这些工作。
+
+#### Step 3b — 手工 fallback（仅在 generator 不能用时）
+
+如果消费方是非 Web 环境（iOS / SwiftUI / 小程序 / Flutter / 原生），按 `references/03-node-to-html.md` 的七步算法手工还原。
+
+**前置**（仅 fallback）：
+1. Read `02-css-reset.md` 把 reset 块复制到样式表顶部（Web 场景）
 2. Read `03-node-to-html.md` 掌握七步算法
 3. 根据节点类型按需 Read 04-08
 
-**每个节点按 `03-node-to-html.md` 的七步算法执行**。
-
-**写代码时优先级（硬规定）**：
+**消费时优先级（硬规定，3a 和 3b 通用）**：
 
 1. `node.computedCss.full` / `node.computedHtml` 存在 → **直接贴，不再推理**
 2. `node.computedCss.<field>` 存在 → 直接映射到对应 CSS 属性
@@ -96,7 +117,8 @@ xxxx    标题         true     1        渲染
 - [ ] Bridge 提取成功，未静默降级
 - [ ] 节点审计表已生成，HIDDEN / OPACITY=0 节点未渲染
 - [ ] cross-validation-report 的 HIGH 警告已处理
-- [ ] 代码最顶部有 `02-css-reset.md` 的 reset 块
+- [ ] **Web 场景已经跑 `generate_skeleton.mjs` 拿到骨架**（Step 3a），仅做命名/语义/交互定制
+- [ ] 代码最顶部有 `02-css-reset.md` 的 reset 块（Step 3a 生成器已自动注入）
 - [ ] 所有 `computedCss.full` / `computedHtml` 存在的节点直接贴，没回头手算
 - [ ] 所有 `layoutMode: NONE` 的 FRAME 用了 absolute 定位，子节点按 `absoluteBoundingBox.x/y` 排序
 - [ ] 所有 TEXT 的 segments ≥2 段拆了 span
