@@ -117,7 +117,7 @@ function formatRadii(r) {
   return null;
 }
 
-function emitRule(node, parentNode) {
+function emitRule(node, parentNode, indexById) {
   const decls = [];
 
   // ───── Positioning & sizing contract with parent ─────
@@ -167,7 +167,20 @@ function emitRule(node, parentNode) {
   const isParentRow = parentNode?.flex?.direction === 'row';
   const emitWidth = !(flexMainFill && isParentRow);
   const emitHeight = !(flexMainFill && !isParentRow);
-  if (emitWidth && node.box.width != null) decls.push(['width', px(node.box.width)]);
+  // For TEXT nodes: Figma pre-measures text in its own font engine and stores the
+  // resulting width as node.box.width. Browsers with the same font family+size
+  // produce slightly different metrics — setting an explicit CSS width causes the
+  // last few characters to be clipped by parent overflow (common: buttons losing
+  // trailing letters). Use min-width instead so text drives the final size naturally.
+  //
+  // Same treatment for containers marked sizingH='HUG' in Figma — these are meant
+  // to auto-size to fit their content, not be constrained. If we emit fixed width
+  // they cascade-clip whatever expands inside (usually text).
+  const isHugWidth = node.role === 'text' || node.sizingH === 'HUG';
+  if (emitWidth && node.box.width != null) {
+    if (isHugWidth) decls.push(['min-width', px(node.box.width)]);
+    else decls.push(['width', px(node.box.width)]);
+  }
   if (emitHeight && node.box.height != null) decls.push(['height', px(node.box.height)]);
 
   // Flex container
@@ -287,7 +300,7 @@ function emitCss(renderReady) {
   const rules = [];
   for (const node of renderReady.nodes) {
     const parent = node.parentId ? indexById.get(node.parentId) : null;
-    let rule = emitRule(node, parent);
+    let rule = emitRule(node, parent, indexById);
     if (needsRelative.has(node.id) && !rule.includes('position:')) {
       rule = rule.replace(/\n\}$/, '\n  position: relative;\n}');
     }

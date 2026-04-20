@@ -391,6 +391,8 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
           }
         : null,
       positioning: layout.layoutPositioning || 'AUTO',
+      sizingH: layout.layoutSizingHorizontal || null,
+      sizingV: layout.layoutSizingVertical || null,
       clipsContent: !!layout.clipsContent,
       style: {
         bg: resolveSolidPaint(style.fills) ?? resolveSolidPaint(style.backgrounds) ?? null,
