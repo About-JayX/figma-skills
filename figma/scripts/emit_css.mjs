@@ -15,6 +15,57 @@ img { display: block; }
 
 `;
 
+// B2 — Google Fonts allowlist. Families here get an @import at the top of App.css.
+// Expand this set as new designs introduce new families (safe — unknown families simply
+// won't generate @import, browser falls back to system fonts).
+const GOOGLE_FONT_FAMILIES = new Set([
+  'Inter', 'Roboto', 'Open Sans', 'Poppins', 'Lato', 'Montserrat', 'Noto Sans',
+  'Source Sans 3', 'Work Sans', 'Rubik', 'Nunito', 'Nunito Sans',
+  'DM Sans', 'DM Serif Display', 'DM Mono',
+  'Roboto Mono', 'Roboto Slab', 'Roboto Condensed',
+  'Crimson Text', 'Crimson Pro',
+  'Staatliches', 'Jaro', 'Geist', 'Geist Mono',
+  'Reddit Mono', 'Reddit Sans',
+  'Rethink Sans',
+  'Playfair Display', 'Merriweather', 'EB Garamond',
+  'Space Grotesk', 'Space Mono',
+  'Bebas Neue', 'Oswald', 'Anton',
+  'Archivo', 'Archivo Narrow',
+  'Manrope', 'Outfit', 'Plus Jakarta Sans',
+  'IBM Plex Sans', 'IBM Plex Mono', 'IBM Plex Serif',
+]);
+
+function buildFontImports(renderReady) {
+  // Collect { family -> Set of weights } from all TEXT nodes
+  const familyWeights = new Map();
+  const normalizeWeight = (w) => {
+    if (w == null) return null;
+    if (typeof w === 'number') return w;
+    const s = String(w).trim().toLowerCase();
+    const map = { thin: 100, light: 300, regular: 400, normal: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
+    if (map[s]) return map[s];
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  for (const n of renderReady.nodes) {
+    if (n.role !== 'text' || !n.text) continue;
+    const fam = n.text.fontFamily;
+    if (!fam || !GOOGLE_FONT_FAMILIES.has(fam)) continue;
+    if (!familyWeights.has(fam)) familyWeights.set(fam, new Set());
+    const w = normalizeWeight(n.text.fontWeight) ?? 400;
+    familyWeights.get(fam).add(w);
+  }
+  if (familyWeights.size === 0) return '';
+  // Build single @import covering all families
+  const parts = [];
+  for (const [fam, weights] of familyWeights) {
+    const sorted = [...weights].sort((a, b) => a - b);
+    const weightSpec = sorted.length ? `:wght@${sorted.join(';')}` : '';
+    parts.push(`family=${fam.replace(/\s+/g, '+')}${weightSpec}`);
+  }
+  return `@import url('https://fonts.googleapis.com/css2?${parts.join('&')}&display=swap');\n\n`;
+}
+
 function px(v) {
   return v == null ? null : `${+v.toFixed(2)}px`.replace('.00px', 'px');
 }
@@ -122,11 +173,12 @@ function emitRule(node, parentNode) {
   if (node.style.opacity != null) decls.push(['opacity', node.style.opacity]);
 
   // Effects
-  const shadows = node.style.effects.filter((e) => e.kind === 'box-shadow').map((e) => e.value);
+  const effects = node.style.effects || [];
+  const shadows = effects.filter((e) => e.kind === 'box-shadow').map((e) => e.value);
   if (shadows.length) decls.push(['box-shadow', shadows.join(', ')]);
-  const filters = node.style.effects.filter((e) => e.kind === 'filter').map((e) => e.value);
+  const filters = effects.filter((e) => e.kind === 'filter').map((e) => e.value);
   if (filters.length) decls.push(['filter', filters.join(' ')]);
-  const backdrops = node.style.effects.filter((e) => e.kind === 'backdrop-filter').map((e) => e.value);
+  const backdrops = effects.filter((e) => e.kind === 'backdrop-filter').map((e) => e.value);
   if (backdrops.length) decls.push(['backdrop-filter', backdrops.join(' ')]);
 
   // Text
@@ -137,6 +189,7 @@ function emitRule(node, parentNode) {
     if (node.text.lineHeight) decls.push(['line-height', node.text.lineHeight]);
     if (node.text.letterSpacing) decls.push(['letter-spacing', node.text.letterSpacing]);
     if (node.text.color) decls.push(['color', node.text.color]);
+    if (node.text.textAlign) decls.push(['text-align', node.text.textAlign]);
     // Single-line heuristic: Figma stores width exactly fitting one line; browser font
     // metrics diverge slightly, so text can wrap unexpectedly (e.g. "How-to" at the hyphen).
     // fontSize may be null for text inside COMPONENT INSTANCES (bridge doesn't expose segments
@@ -184,7 +237,8 @@ function emitCss(renderReady) {
     }
     rules.push(rule);
   }
-  return RESET + rules.join('\n\n') + '\n';
+  const fontImports = buildFontImports(renderReady);
+  return fontImports + RESET + rules.join('\n\n') + '\n';
 }
 
 function main() {

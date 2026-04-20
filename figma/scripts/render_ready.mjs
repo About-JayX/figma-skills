@@ -116,7 +116,63 @@ function extractTextFromComputedHtml(html) {
     .replace(/&#39;/g, "'");
 }
 
-function buildTextRun(node) {
+// Bridge's computedCss.full is a CSS declaration string like
+//   "display: flex; font-family: 'DM Sans'; font-size: 14px; ..."
+// Parse it into a plain object. Declarations with complex values (e.g. url(), gradient())
+// are kept verbatim; simple value types are returned as-is strings.
+function parseComputedCss(full) {
+  if (!full || typeof full !== 'string') return {};
+  const out = {};
+  // Split on `;` but respect parens (url(a;b) shouldn't split there). Simple state machine:
+  let depth = 0;
+  let current = '';
+  const parts = [];
+  for (const ch of full) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === ';' && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  for (const p of parts) {
+    const idx = p.indexOf(':');
+    if (idx < 0) continue;
+    const k = p.slice(0, idx).trim().toLowerCase();
+    const v = p.slice(idx + 1).trim();
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
+function unquoteFontFamily(v) {
+  if (!v) return null;
+  // Take first family only — Figma typically emits a single quoted name, we add fallback later
+  const first = v.split(',')[0].trim();
+  return first.replace(/^['"]|['"]$/g, '') || null;
+}
+
+function parsePx(v) {
+  if (!v || typeof v !== 'string') return null;
+  const m = v.trim().match(/^(-?\d+(?:\.\d+)?)(px)?$/);
+  return m ? Number(m[1]) : null;
+}
+
+// border-radius can be "30px" or "30px 16px 16px 30px" or "30px 16px" (shorthand 2-value).
+function parseBorderRadius(v) {
+  if (!v || typeof v !== 'string') return null;
+  const nums = v.trim().split(/\s+/).map((p) => parsePx(p)).filter((n) => n != null);
+  if (nums.length === 0) return null;
+  if (nums.length === 1) return nums[0];
+  if (nums.length === 2) return [nums[0], nums[1], nums[0], nums[1]]; // top|bottom, left|right
+  if (nums.length === 3) return [nums[0], nums[1], nums[2], nums[1]];
+  return [nums[0], nums[1], nums[2], nums[3]];
+}
+
+function buildTextRun(node, parsedCss) {
   const segs = node.style?.textSegments || [];
   // Content extraction — always prefer computedHtml first (Figma's rendered text
   // supports component-instance overrides, multi-run merges, and inline edits that
@@ -125,41 +181,43 @@ function buildTextRun(node) {
   const fromSegs = segs.length ? segs.map((x) => x.characters).join('') : null;
   const content = fromHtml || fromSegs || node.characters || node.name || '';
 
-  // Style attributes only come from textSegments[0] (computedHtml is plain string, no styling).
-  // If no segments (e.g. COMPONENT INSTANCE), leave style fields null — emit_css falls back
-  // to computedCss.full and height heuristics.
+  // B1 — When textSegments is empty (typically COMPONENT INSTANCE), fall back to parsed
+  // computedCss.full to pull typography. Bridge's computed CSS is the closest thing to
+  // "what Figma actually rendered".
   if (segs.length === 0) {
     return {
       content,
-      fontFamily: null,
-      fontSize: null,
-      fontWeight: null,
-      lineHeight: null,
-      letterSpacing: null,
-      color: null,
+      fontFamily: unquoteFontFamily(parsedCss['font-family']) || null,
+      fontSize: parsePx(parsedCss['font-size']) || null,
+      fontWeight: parsedCss['font-weight'] || null,
+      lineHeight: parsedCss['line-height'] || null,
+      letterSpacing: parsedCss['letter-spacing'] || null,
+      color: parsedCss['color'] || null,
+      textAlign: parsedCss['text-align'] || null,
     };
   }
   const s = segs[0];
   return {
     content,
-    fontFamily: s.fontName?.family || null,
-    fontSize: s.fontSize || null,
-    fontWeight: s.fontWeight || s.fontName?.style || null,
+    // Prefer segment data (more structured), but fall back to parsed CSS when a field
+    // is missing — covers partial/incomplete segment data.
+    fontFamily: s.fontName?.family || unquoteFontFamily(parsedCss['font-family']) || null,
+    fontSize: s.fontSize || parsePx(parsedCss['font-size']) || null,
+    fontWeight: s.fontWeight || s.fontName?.style || parsedCss['font-weight'] || null,
     lineHeight: (() => {
       const lh = s.lineHeight;
-      if (!lh) return null;
-      if (lh.unit === 'PIXELS') return `${lh.value}px`;
-      if (lh.unit === 'PERCENT') return `${lh.value}%`;
-      return null;
+      if (lh?.unit === 'PIXELS') return `${lh.value}px`;
+      if (lh?.unit === 'PERCENT') return `${lh.value}%`;
+      return parsedCss['line-height'] || null;
     })(),
     letterSpacing: (() => {
       const ls = s.letterSpacing;
-      if (!ls) return null;
-      if (ls.unit === 'PIXELS') return `${ls.value}px`;
-      if (ls.unit === 'PERCENT') return `${+((ls.value ?? 0) / 100).toFixed(4)}em`;
-      return null;
+      if (ls?.unit === 'PIXELS') return `${ls.value}px`;
+      if (ls?.unit === 'PERCENT') return `${+((ls.value ?? 0) / 100).toFixed(4)}em`;
+      return parsedCss['letter-spacing'] || null;
     })(),
-    color: resolveSolidPaint(s.fills) || null,
+    color: resolveSolidPaint(s.fills) || parsedCss['color'] || null,
+    textAlign: parsedCss['text-align'] || null,
   };
 }
 
@@ -213,6 +271,8 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
     const kids = (node.children || []).filter(
       (c) => c.visible !== false && (c.style?.opacity ?? 1) !== 0
     );
+    // Parse bridge's computedCss.full once per node (used by B1 text fallback, B3 radius fallback)
+    const parsedCss = parseComputedCss(node.computedCss?.full);
 
     const role = (() => {
       if (node.type === 'TEXT') return 'text';
@@ -279,12 +339,22 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
               left: style.strokeWeights.left || 0,
             }
           : null,
-        borderRadius: node.cornerRadius ?? null,
-        borderRadii: node.cornerRadii ?? null,
+        // B3 — border-radius: prefer Figma scalar/array; fall back to computedCss parse
+        // (covers nodes where Figma only exposes radius via computed CSS, e.g. some INSTANCE)
+        borderRadius: (() => {
+          if (node.cornerRadius != null) return node.cornerRadius;
+          const parsed = parseBorderRadius(parsedCss['border-radius']);
+          return typeof parsed === 'number' ? parsed : null;
+        })(),
+        borderRadii: (() => {
+          if (node.cornerRadii != null) return node.cornerRadii;
+          const parsed = parseBorderRadius(parsedCss['border-radius']);
+          return Array.isArray(parsed) ? parsed : null;
+        })(),
         opacity: opacity < 1 ? opacity : null,
         effects: extractEffects(style.effects),
       },
-      text: node.type === 'TEXT' ? buildTextRun(node) : null,
+      text: node.type === 'TEXT' ? buildTextRun(node, parsedCss) : null,
       image: extractImagePaint(style.fills, assetsIndex),
       vector: (() => {
         if (node.type !== 'VECTOR' && node.type !== 'BOOLEAN_OPERATION') return null;
