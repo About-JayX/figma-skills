@@ -69,7 +69,7 @@ function trimPayloadForTransport(payload) {
 
 async function postJobResult(jobId, payload, reportStage) {
   if (reportStage) {
-    reportStage.loading('transport.serialize.start', '结果序列化中', null);
+    reportStage.loading('transport.serialize.start', 'Serializing result payload', null);
   }
 
   var limits = getResultTransportLimits();
@@ -78,7 +78,7 @@ async function postJobResult(jobId, payload, reportStage) {
   var payloadBytes = encoded.byteLength;
 
   if (reportStage) {
-    reportStage.ok('transport.serialize.done', '结果序列化完成', {
+    reportStage.ok('transport.serialize.done', 'Result serialization complete', {
       payloadBytes: payloadBytes,
       trimmed: transportPayload !== payload,
       defsTotal:
@@ -95,7 +95,7 @@ async function postJobResult(jobId, payload, reportStage) {
     var payloadBreakdown = buildPayloadSizeDiagnostics(transportPayload);
     throw createPluginError(
       'RESULT_PAYLOAD_TOO_LARGE',
-      '结果字节超出上限: ' + payloadBytes + ' > ' + limits.maxTotalBytes,
+      'Result payload exceeds the limit: ' + payloadBytes + ' > ' + limits.maxTotalBytes,
       {
         payloadBytes: payloadBytes,
         maxTotalBytes: limits.maxTotalBytes,
@@ -105,7 +105,7 @@ async function postJobResult(jobId, payload, reportStage) {
   }
 
   if (reportStage) {
-    reportStage.loading('transport.post.start', '结果回传 bridge 中', {
+    reportStage.loading('transport.post.start', 'Posting result back to Bridge', {
       payloadBytes: payloadBytes,
     });
   }
@@ -121,14 +121,14 @@ async function postJobResult(jobId, payload, reportStage) {
     var result = await response.json();
 
     if (reportStage) {
-      reportStage.ok('transport.post.done', 'bridge 已响应结果回传', {
+      reportStage.ok('transport.post.done', 'Bridge acknowledged the result upload', {
         status: response.status,
         bridgeOk: !!(result && result.ok),
       });
     }
 
     if (!response.ok || !result.ok) {
-      throw new Error(result && result.error ? result.error : 'Bridge 回传失败');
+      throw new Error(result && result.error ? result.error : 'Bridge result upload failed');
     }
 
     return result;
@@ -139,13 +139,13 @@ async function postJobResult(jobId, payload, reportStage) {
   if (totalChunks > limits.maxChunkCount) {
     throw createPluginError(
       'RESULT_CHUNK_COUNT_EXCEEDED',
-      '结果分块数超出上限: ' + totalChunks + ' > ' + limits.maxChunkCount,
+      'Result chunk count exceeds the limit: ' + totalChunks + ' > ' + limits.maxChunkCount,
       { totalChunks: totalChunks, maxChunkCount: limits.maxChunkCount }
     );
   }
 
   if (reportStage) {
-    reportStage.loading('transport.chunked.start', '分块回传中', {
+    reportStage.loading('transport.chunked.start', 'Uploading chunked result payload', {
       totalChunks: totalChunks,
       chunkSizeBytes: limits.chunkSizeBytes,
       payloadBytes: payloadBytes,
@@ -161,7 +161,7 @@ async function postJobResult(jobId, payload, reportStage) {
     if (chunk.byteLength > limits.maxChunkBytes) {
       throw createPluginError(
         'RESULT_CHUNK_TOO_LARGE',
-        '结果单块超出上限: ' + chunk.byteLength + ' > ' + limits.maxChunkBytes,
+        'A result chunk exceeds the limit: ' + chunk.byteLength + ' > ' + limits.maxChunkBytes,
         { chunkIndex: i, chunkBytes: chunk.byteLength, maxChunkBytes: limits.maxChunkBytes }
       );
     }
@@ -178,12 +178,12 @@ async function postJobResult(jobId, payload, reportStage) {
     });
     var chunkResult = await chunkRes.json();
     if (!chunkRes.ok || !chunkResult.ok) {
-      throw new Error(chunkResult && chunkResult.error ? chunkResult.error : 'Bridge 分块回传失败 chunk=' + i);
+      throw new Error(chunkResult && chunkResult.error ? chunkResult.error : 'Bridge chunk upload failed at chunk=' + i);
     }
   }
 
   if (reportStage) {
-    reportStage.ok('transport.chunked.done', '分块回传完成', {
+    reportStage.ok('transport.chunked.done', 'Chunked result upload complete', {
       totalChunks: totalChunks,
       payloadBytes: payloadBytes,
     });

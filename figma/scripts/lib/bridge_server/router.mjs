@@ -42,7 +42,7 @@ export function createBridgeServerRequestHandler(state) {
       const documentName = body && typeof body.documentName === 'string' ? body.documentName : null;
       const client = state.pluginClients.get(clientId);
       if (!client) {
-        writeJson(res, 404, { ok: false, error: '未找到该 clientId', errorCode: 'CLIENT_NOT_FOUND' });
+        writeJson(res, 404, { ok: false, error: 'Could not find that clientId', errorCode: 'CLIENT_NOT_FOUND' });
         return;
       }
       client.fileKey = fileKey || null;

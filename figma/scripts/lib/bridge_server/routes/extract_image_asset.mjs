@@ -26,7 +26,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   } catch (error) {
     writeJson(res, 400, {
       ok: false,
-      error: '请求体不是合法 JSON',
+      error: 'Request body is not valid JSON',
       errorCode: 'INVALID_JSON',
     });
     return;
@@ -39,7 +39,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   if (!imageHash) {
     writeJson(res, 400, {
       ok: false,
-      error: '缺少 imageHash',
+      error: 'Missing imageHash',
       errorCode: 'INVALID_IMAGE_HASH',
     });
     return;
@@ -51,7 +51,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   if (mismatch) {
     writeJson(res, 409, {
       ok: false,
-      error: `没有匹配 fileKey "${effectiveFileKey}" 的插件连接`,
+      error: `No plugin connection matches fileKey "${effectiveFileKey}"`,
       errorCode: 'FILEKEY_MISMATCH',
     });
     return;
@@ -59,7 +59,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   if (ambiguous) {
     writeJson(res, 409, {
       ok: false,
-      error: '多插件场景下无 fileKey，无法确定路由。请传 Figma URL 或 body.fileKey。',
+      error: 'Routing is ambiguous in a multi-plugin session without a fileKey. Pass a full Figma URL or body.fileKey.',
       errorCode: 'AMBIGUOUS_ROUTING',
     });
     return;
@@ -67,7 +67,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   if (!pluginClient) {
     writeJson(res, 409, {
       ok: false,
-      error: '未检测到活动的 ws_defs 插件连接',
+      error: 'No active ws_defs plugin connection was detected',
       errorCode: 'NO_PLUGIN_CONNECTION',
     });
     return;
@@ -123,7 +123,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
     if (!assetData || !assetData.bytes) {
       writeJson(res, 404, {
         ok: false,
-        error: '未收到图片二进制数据',
+        error: 'No image binary payload was received',
         errorCode: 'ASSET_NOT_RECEIVED',
       });
       return;
@@ -143,7 +143,7 @@ export async function handleExtractImageAssetRequest(state, req, res) {
   } catch (error) {
     writeJson(res, 504, {
       ok: false,
-      error: errorMessageOf(error, '图片资产请求失败'),
+      error: errorMessageOf(error, 'Image asset request failed'),
       errorCode: errorCodeOf(error, 'PLUGIN_TIMEOUT'),
     });
   }

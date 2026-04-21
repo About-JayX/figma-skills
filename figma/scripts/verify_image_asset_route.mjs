@@ -257,7 +257,7 @@ async function testImageTooLargeEstimated(sseConn) {
 
   await postJobResult(jobId, {
     ok: false,
-    error: '图片尺寸预估超限，跳过二进制读取',
+    error: 'Estimated image dimensions exceed the limit; skipping binary read',
     errorCode: 'IMAGE_TOO_LARGE_ESTIMATED',
     details: {
       imageHash: 'hash_estimated_preflight',
@@ -299,7 +299,7 @@ async function testImageTooLarge(sseConn) {
 
   await postJobResult(jobId, {
     ok: false,
-    error: '图片字节超出上限: 50000000 > 33554432',
+    error: 'Image bytes exceed the limit: 50000000 > 33554432',
     errorCode: 'IMAGE_TOO_LARGE',
     details: {
       imageHash: 'hash_bytes_too_large',
@@ -335,7 +335,7 @@ async function testGenericPluginError(sseConn) {
 
   await postJobResult(jobId, {
     ok: false,
-    error: '未知内部错误',
+    error: 'Unknown internal error',
     errorCode: 'INTERNAL_PLUGIN_CRASH',
   });
 

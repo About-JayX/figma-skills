@@ -16,7 +16,7 @@ function getBlobTransportLimits() {
 
 async function postJobBlob(jobId, blob, reportStage) {
   if (!blob || typeof blob !== 'object') {
-    throw createPluginError('INVALID_BLOB', '缺少 blob 元数据');
+    throw createPluginError('INVALID_BLOB', 'Missing blob metadata');
   }
 
   var text = typeof blob.text === 'string' ? blob.text : '';
@@ -30,7 +30,7 @@ async function postJobBlob(jobId, blob, reportStage) {
   if (byteLength > limits.maxTotalBytes) {
     throw createPluginError(
       'BLOB_TOO_LARGE',
-      'blob 字节超出上限: ' + byteLength + ' > ' + limits.maxTotalBytes,
+      'Blob bytes exceed the limit: ' + byteLength + ' > ' + limits.maxTotalBytes,
       {
         kind: kind,
         nodeId: nodeId,
@@ -41,7 +41,7 @@ async function postJobBlob(jobId, blob, reportStage) {
   }
 
   if (reportStage) {
-    reportStage.loading('blob.transport.start', 'SVG side-channel 上传中', {
+    reportStage.loading('blob.transport.start', 'Uploading SVG through the side channel', {
       kind: kind,
       nodeId: nodeId,
       byteLength: byteLength,
@@ -63,11 +63,11 @@ async function postJobBlob(jobId, blob, reportStage) {
     });
     var result = await response.json();
     if (!response.ok || !result.ok) {
-      throw new Error(result && result.error ? result.error : 'Bridge blob 回传失败');
+      throw new Error(result && result.error ? result.error : 'Bridge blob upload failed');
     }
 
     if (reportStage) {
-      reportStage.ok('blob.transport.done', 'SVG side-channel 上传完成', {
+      reportStage.ok('blob.transport.done', 'SVG side-channel upload complete', {
         kind: kind,
         nodeId: nodeId,
         byteLength: byteLength,
@@ -89,7 +89,7 @@ async function postJobBlob(jobId, blob, reportStage) {
   if (totalChunks > limits.maxChunkCount) {
     throw createPluginError(
       'BLOB_CHUNK_COUNT_EXCEEDED',
-      'blob 分块数超出上限: ' + totalChunks + ' > ' + limits.maxChunkCount,
+      'Blob chunk count exceeds the limit: ' + totalChunks + ' > ' + limits.maxChunkCount,
       {
         kind: kind,
         nodeId: nodeId,
@@ -106,7 +106,7 @@ async function postJobBlob(jobId, blob, reportStage) {
     if (chunk.byteLength > limits.maxChunkBytes) {
       throw createPluginError(
         'BLOB_CHUNK_TOO_LARGE',
-        'blob 单块超出上限: ' + chunk.byteLength + ' > ' + limits.maxChunkBytes,
+        'A blob chunk exceeds the limit: ' + chunk.byteLength + ' > ' + limits.maxChunkBytes,
         {
           kind: kind,
           nodeId: nodeId,
@@ -129,12 +129,12 @@ async function postJobBlob(jobId, blob, reportStage) {
     });
     var chunkResult = await chunkResponse.json();
     if (!chunkResponse.ok || !chunkResult.ok) {
-      throw new Error(chunkResult && chunkResult.error ? chunkResult.error : 'Bridge blob 分块回传失败 chunk=' + i);
+      throw new Error(chunkResult && chunkResult.error ? chunkResult.error : 'Bridge blob chunk upload failed at chunk=' + i);
     }
   }
 
   if (reportStage) {
-    reportStage.ok('blob.transport.done', 'SVG side-channel 上传完成', {
+    reportStage.ok('blob.transport.done', 'SVG side-channel upload complete', {
       kind: kind,
       nodeId: nodeId,
       byteLength: byteLength,

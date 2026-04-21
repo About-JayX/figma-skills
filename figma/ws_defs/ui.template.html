@@ -18,12 +18,12 @@
 </style>
 </head>
 <body>
-<div id="bridge" class="loading">Bridge SSE 连接中...</div>
-<div id="status" class="loading">初始化中...</div>
-<div id="hint">插件默认不会自动提取。只有收到 Bridge 的 extract-node-defs / extract-image-asset 指令时才会执行并回传结果。</div>
-<button id="reconnect-button" type="button">重新连接 SSE</button>
-<button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">获取选中节点 ID</button>
-<div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="点击复制"></div>
+<div id="bridge" class="loading">Connecting to Bridge SSE...</div>
+<div id="status" class="loading">Initializing...</div>
+<div id="hint">The plugin does not extract automatically by default. It only runs and returns results after receiving a Bridge command such as extract-node-defs or extract-image-asset.</div>
+<button id="reconnect-button" type="button">Reconnect SSE</button>
+<button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">Get selected node ID</button>
+<div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="Click to copy"></div>
 <div id="log"></div>
 <!-- WS_DEFS_RUNTIME_CONFIG_SCRIPT -->
 <!-- WS_DEFS_UI_BUNDLE_SCRIPT -->

@@ -27,7 +27,7 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
     }).then((res) => {
       if (res.ok) {
         const label = fileKey || documentName || '(unknown)';
-        onBridgeStatus('Bridge SSE 已连接 (fileKey: ' + label + ')', 'ok');
+        onBridgeStatus('Bridge SSE connected (fileKey: ' + label + ')', 'ok');
       }
     }).catch(() => {
       // registration is best-effort
@@ -55,14 +55,14 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
     try {
       const payload = JSON.parse(event.data || '{}') as BridgeCommandPayload;
       if (!payload.jobId) {
-        onBridgeStatus('收到无效 job，已忽略', 'error');
+        onBridgeStatus('Received an invalid job and ignored it', 'error');
         return;
       }
 
-      onBridgeStatus('收到 ' + eventName + ' job ' + payload.jobId, 'ok');
+      onBridgeStatus('Received ' + eventName + ' job ' + payload.jobId, 'ok');
       forwardBridgeCommand(forwardType, payload);
     } catch {
-      onBridgeStatus('Bridge 事件解析失败', 'error');
+      onBridgeStatus('Failed to parse a Bridge event', 'error');
     }
   }
 
@@ -72,11 +72,11 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
     }
 
     currentClientId = null;
-    onBridgeStatus('Bridge SSE 连接中...', 'loading');
+    onBridgeStatus('Connecting to Bridge SSE...', 'loading');
     eventSource = new EventSource(eventsUrl);
 
     eventSource.addEventListener('ready', (event) => {
-      onBridgeStatus('Bridge SSE 已连接', 'ok');
+      onBridgeStatus('Bridge SSE connected', 'ok');
       try {
         const data = JSON.parse((event as MessageEvent<string>).data || '{}');
         if (data.clientId) {
@@ -106,7 +106,7 @@ export function createBridgeConnection(options: BridgeConnectionOptions) {
     });
 
     eventSource.onerror = () => {
-      onBridgeStatus('Bridge SSE 已断开，等待重连...', 'error');
+      onBridgeStatus('Bridge SSE disconnected, waiting to reconnect...', 'error');
       // EventSource auto-reconnects; on next ready event, currentClientId will update
       // and tryRegister() will fire with the cached currentFileKey.
       currentClientId = null;

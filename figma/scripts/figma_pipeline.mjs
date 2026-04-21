@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Figma 一键还原 Pipeline
+ * Figma one-shot reproduction pipeline
  *
- * 用法:
+ * Usage:
  *   node ./scripts/figma_pipeline.mjs "<figma-url>"
  *
- * 自动执行:
+ * Automatically runs:
  *   1. bridge ensure + extract
- *   2. MCP merge (如果有缓存)
- *   3. 交叉校验 (style.strokes 渐变降级、effects 跳过、gradientTransform 检查)
- *   4. 生成 baseline PNG (rsvg-convert)
- *   5. 输出校验报告
+ *   2. MCP merge (if cache is available)
+ *   3. Cross-validation (gradient stroke downgrades, effect omissions, gradientTransform checks)
+ *   4. Generate a baseline PNG
+ *   5. Emit verification artifacts
  */
 
 import { execSync, spawnSync } from 'child_process';
@@ -49,18 +49,18 @@ function bridgeExtract(url) {
   console.log('\n[1/5] Bridge ensure + extract...');
   const ensureResult = parseJson(run(`node ${SCRIPTS}/bridge_client.mjs ensure`));
   if (!ensureResult?.ok) {
-    console.error('  ✗ Bridge 启动失败');
+    console.error('  ✗ Bridge failed to start');
     return null;
   }
-  console.log(`  ✓ Bridge 在线 (plugin connections: ${ensureResult.health?.pluginConnections || 0})`);
+  console.log(`  ✓ Bridge is online (plugin connections: ${ensureResult.health?.pluginConnections || 0})`);
 
   const agentResult = parseJson(run(`node ${SCRIPTS}/bridge_client.mjs agent "${url}"`));
   if (!agentResult?.ok) {
     const errCode = agentResult?.errorCode || agentResult?.bridge?.errorCode || '';
-    console.error(`  ✗ 节点提取失败${errCode ? ` [${errCode}]` : ''}: ${agentResult?.error || 'unknown'}`);
+    console.error(`  ✗ Node extraction failed${errCode ? ` [${errCode}]` : ''}: ${agentResult?.error || 'unknown'}`);
     return null;
   }
-  console.log(`  ✓ 节点提取成功: ${agentResult.bridge?.node?.name || ''} (${agentResult.bridge?.diagnostics?.designSnapshot?.css?.attached || 0} CSS)`);
+  console.log(`  ✓ Node extracted: ${agentResult.bridge?.node?.name || ''} (${agentResult.bridge?.diagnostics?.designSnapshot?.css?.attached || 0} CSS)`);
   return agentResult;
 }
 
@@ -76,7 +76,7 @@ function fetchDeferredAssets(url, data) {
   );
   if (deferred.length === 0) return;
 
-  console.log(`\n[1.5/5] 拉取延迟图片资源 (${deferred.length} 张)...`);
+  console.log(`\n[1.5/5] Fetching deferred image assets (${deferred.length})...`);
 
   let ok = 0;
   let fail = 0;
@@ -86,11 +86,11 @@ function fetchDeferredAssets(url, data) {
       console.log(`  ✓ ${hash.slice(0, 12)}... → ${result.fileName} (${(result.byteLength / 1024).toFixed(0)}KB)`);
       ok++;
     } else {
-      console.log(`  ✗ ${hash.slice(0, 12)}... 失败: ${result?.error || 'unknown'}`);
+      console.log(`  ✗ ${hash.slice(0, 12)}... failed: ${result?.error || 'unknown'}`);
       fail++;
     }
   }
-  console.log(`  合计: 成功 ${ok}, 失败 ${fail}`);
+  console.log(`  Totals: success ${ok}, failed ${fail}`);
 }
 
 // === Step 1.8: Inject computed gradient CSS per node ===
@@ -173,25 +173,25 @@ function mergeCache(url) {
   console.log('\n[2/5] Merge cache...');
   const result = parseJson(run(`node ${SCRIPTS}/merge_cache.mjs "${url}"`));
   if (!result?.ok) {
-    console.log('  ⚠ Merge 跳过 (无 MCP 缓存或解析失败)');
+    console.log('  ⚠ Merge skipped (no MCP cache was available or parsing failed)');
     return null;
   }
-  console.log(`  ✓ 合并完成: ${result.mergedAgentPayload || ''}`);
+  console.log(`  ✓ Merge complete: ${result.mergedAgentPayload || ''}`);
   return result;
 }
 
-// === Step 3: 交叉校验 ===
+// === Step 3: cross-validation ===
 function crossValidate(cacheDir, data) {
-  console.log('\n[3/5] 交叉校验 style.* vs node.css...');
+  console.log('\n[3/5] Cross-validating style.* vs node.css...');
 
   if (!data) {
-    console.log('  ⚠ 无 agent payload，跳过校验');
+    console.log('  ⚠ No agent payload was found; skipping validation');
     return [];
   }
 
   const root = data?.designSnapshot?.root;
   if (!root) {
-    console.log('  ⚠ 无 designSnapshot，跳过校验');
+    console.log('  ⚠ No designSnapshot was found; skipping validation');
     return [];
   }
 
@@ -203,7 +203,7 @@ function crossValidate(cacheDir, data) {
     const style = node.style || {};
     const css = node.css || {};
 
-    // Check 1: 渐变描边被 node.css 降级为 solid
+    // Check 1: gradient strokes were downgraded to solid borders in node.css
     const strokes = style.strokes || [];
     for (const stroke of strokes) {
       if (stroke.type?.startsWith('GRADIENT_') && stroke.visible !== false) {
@@ -212,14 +212,14 @@ function crossValidate(cacheDir, data) {
           warnings.push({
             level: 'HIGH',
             node: `${nid} (${name})`,
-            issue: `渐变描边 ${stroke.type} 被 node.css 降级为 solid border`,
-            action: '必须用 mask-composite 或渐变背景+padding 实现，不能信 node.css.border',
+            issue: `Gradient stroke ${stroke.type} was downgraded to a solid border in node.css`,
+            action: 'Use mask-composite or a gradient background plus padding. Do not trust node.css.border here.',
           });
         }
       }
     }
 
-    // Check 2: effects 是否存在但 node.css 中缺少对应属性
+    // Check 2: effects exist but the expected node.css properties are missing
     const effects = style.effects || [];
     for (const effect of effects) {
       if (effect.visible === false) continue;
@@ -228,16 +228,16 @@ function crossValidate(cacheDir, data) {
           warnings.push({
             level: 'MEDIUM',
             node: `${nid} (${name})`,
-            issue: `LAYER_BLUR radius=${effect.radius} 未出现在 node.css.filter 中`,
-            action: '检查是否被省略，如果 blur+blend 同元素需要拆层',
+            issue: `LAYER_BLUR radius=${effect.radius} did not appear in node.css.filter`,
+            action: 'Check whether it was dropped. If blur and blend share the same element, split layers.',
           });
         }
         if (css['mix-blend-mode'] && css.filter?.includes('blur')) {
           warnings.push({
             level: 'HIGH',
             node: `${nid} (${name})`,
-            issue: `node.css 同时有 filter:blur 和 mix-blend-mode，CSS 会创建隔离上下文`,
-            action: '拆成父子两层 DOM：外层 blend，内层 blur',
+            issue: `node.css contains both filter: blur and mix-blend-mode, which creates an isolated compositing context`,
+            action: 'Split this into parent/child DOM layers: outer blend, inner blur.',
           });
         }
       }
@@ -246,12 +246,12 @@ function crossValidate(cacheDir, data) {
           level: 'INFO',
           node: `${nid} (${name})`,
           issue: `Progressive BACKGROUND_BLUR (radius=${effect.radius}, start=${JSON.stringify(effect.startOffset)})`,
-          action: 'CSS 无原生 progressive blur，用 mask-image 限制 blur 区域近似',
+          action: 'CSS has no native progressive blur. Approximate with a masked blur region or escalate the route.',
         });
       }
     }
 
-    // Check 3: fills 有 gradientTransform 时 stop 位置 ≠ 渲染位置
+    // Check 3: gradientTransform means the original stop positions are not the rendered positions
     const fills = style.fills || [];
     for (const fill of fills) {
       if (fill.visible === false) continue;
@@ -265,15 +265,15 @@ function crossValidate(cacheDir, data) {
             warnings.push({
               level: 'MEDIUM',
               node: `${nid} (${name})`,
-              issue: `渐变有 gradientTransform，原始 stop 位置 ≠ 渲染位置`,
-              action: '交叉参考 node.css 中的百分比值，或通过矩阵计算实际位置',
+              issue: `The gradient has a gradientTransform, so the raw stop positions do not match the rendered positions`,
+              action: 'Cross-check node.css percentage output or compute the actual positions from the transform matrix.',
             });
           }
         }
       }
     }
 
-    // Check 4: 有 relativeTransform 旋转时 node.css 的 radial-gradient 参数不可直接用于 absoluteBoundingBox 尺寸
+    // Check 4: when relativeTransform rotates the node, radial-gradient parameters cannot be applied naively to absoluteBoundingBox dimensions
     const layout = node.layout || {};
     const rt = layout.relativeTransform;
     if (rt && Array.isArray(rt) && rt.length === 2) {
@@ -287,8 +287,8 @@ function crossValidate(cacheDir, data) {
           warnings.push({
             level: 'HIGH',
             node: `${nid} (${name})`,
-            issue: `节点有旋转 (原始${origW.toFixed(0)} → abs${absW.toFixed(0)})，node.css radial-gradient 参数基于未旋转坐标系`,
-            action: '用 absoluteBoundingBox 位置+尺寸，渐变中心通过 relativeTransform 矩阵映射',
+            issue: `The node is rotated (raw ${origW.toFixed(0)} -> abs ${absW.toFixed(0)}), but node.css radial-gradient parameters are still based on the unrotated coordinate system`,
+            action: 'Use absoluteBoundingBox for size/position and map the gradient center through relativeTransform.',
           });
         }
       }
@@ -302,27 +302,27 @@ function crossValidate(cacheDir, data) {
   walk(root);
 
   if (warnings.length === 0) {
-    console.log('  ✓ 无校验警告');
+    console.log('  ✓ No validation warnings');
   } else {
     const high = warnings.filter(w => w.level === 'HIGH').length;
     const medium = warnings.filter(w => w.level === 'MEDIUM').length;
     const info = warnings.filter(w => w.level === 'INFO').length;
-    console.log(`  ⚠ ${warnings.length} 条警告 (HIGH:${high} MEDIUM:${medium} INFO:${info})`);
+    console.log(`  ⚠ ${warnings.length} warnings (HIGH:${high} MEDIUM:${medium} INFO:${info})`);
     for (const w of warnings) {
       console.log(`  [${w.level}] ${w.node}: ${w.issue}`);
       console.log(`         → ${w.action}`);
     }
   }
 
-  // 写入校验报告
+  // Write validation report
   const reportPath = path.join(cacheDir, 'cross-validation-report.json');
   fs.writeFileSync(reportPath, JSON.stringify({ warnings, generatedAt: new Date().toISOString() }, null, 2));
-  console.log(`  → 报告: ${reportPath}`);
+  console.log(`  → Report: ${reportPath}`);
 
   return warnings;
 }
 
-// === Step 4: 生成 baseline ===
+// === Step 4: generate baseline ===
 function externalizeSvgImages(svg, assetsDir) {
   if (!fs.existsSync(assetsDir)) return svg;
 
@@ -342,10 +342,10 @@ function externalizeSvgImages(svg, assetsDir) {
 }
 
 function generateBaseline(cacheDir, data) {
-  console.log('\n[4/5] 生成 baseline PNG...');
+  console.log('\n[4/5] Generating baseline PNG...');
 
   if (!data) {
-    console.log('  ⚠ 无 agent payload，跳过');
+    console.log('  ⚠ No agent payload was found; skipping');
     return null;
   }
 
@@ -357,10 +357,10 @@ function generateBaseline(cacheDir, data) {
     try {
       const res = makePreview(pngPath);
       if (res && !res.skipped) {
-        console.log(`  ✓ baseline preview 生成: ${res.preview} (scale recorded in ${path.basename(res.meta)})`);
+        console.log(`  ✓ Baseline preview created: ${res.preview} (scale recorded in ${path.basename(res.meta)})`);
       }
     } catch (e) {
-      console.log(`  ⚠ baseline preview 失败: ${e.message}`);
+      console.log(`  ⚠ Baseline preview failed: ${e.message}`);
     }
   };
 
@@ -379,7 +379,7 @@ function generateBaseline(cacheDir, data) {
       const dst = path.join(baselineDir, 'baseline.png');
       fs.copyFileSync(src, dst);
       const size = fs.statSync(dst).size;
-      console.log(`  ✓ baseline 生成 (plugin A8): ${dst} (${(size / 1024).toFixed(0)}KB)`);
+      console.log(`  ✓ Baseline generated (plugin A8): ${dst} (${(size / 1024).toFixed(0)}KB)`);
       emitPreview(dst);
       return dst;
     }
@@ -387,7 +387,7 @@ function generateBaseline(cacheDir, data) {
 
   const svg = data?.designSnapshot?.root?.svgString;
   if (!svg) {
-    console.log('  ⚠ 节点无 svgString 且 plugin 未上传 baseline，跳过');
+    console.log('  ⚠ The node has no svgString and the plugin did not upload a baseline; skipping');
     return null;
   }
 
@@ -396,15 +396,15 @@ function generateBaseline(cacheDir, data) {
   const svgExternalized = externalizeSvgImages(svg, assetsDir);
   const reduced = svgExternalized.length < svg.length;
   if (reduced) {
-    console.log(`  ✓ SVG 图片外部化: ${(svg.length / 1024 / 1024).toFixed(1)}MB → ${(svgExternalized.length / 1024 / 1024).toFixed(1)}MB`);
+    console.log(`  ✓ Externalized SVG image references: ${(svg.length / 1024 / 1024).toFixed(1)}MB -> ${(svgExternalized.length / 1024 / 1024).toFixed(1)}MB`);
   }
 
-  // 加深色背景
+  // Add a dark background
   const svgWithBg = svgExternalized.replace(/(<svg[^>]*>)/, '$1<rect width="100%" height="100%" fill="#000"/>');
   const svgPath = path.join(cacheDir, 'baseline-source.svg');
   fs.writeFileSync(svgPath, svgWithBg);
 
-  // 尝试 rsvg-convert
+  // Try rsvg-convert first
   const hasRsvg = run('which rsvg-convert');
   const pngPath = path.join(baselineDir, 'baseline.png');
 
@@ -412,11 +412,11 @@ function generateBaseline(cacheDir, data) {
     const result = run(`rsvg-convert -z 2 -o "${pngPath}" "${svgPath}"`);
     if (result !== null || fs.existsSync(pngPath)) {
       const size = fs.statSync(pngPath).size;
-      console.log(`  ✓ baseline 生成 (rsvg): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
+      console.log(`  ✓ Baseline generated (rsvg): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
       emitPreview(pngPath);
       return pngPath;
     }
-    console.log('  ⚠ rsvg-convert 失败，尝试 Chrome fallback...');
+    console.log('  ⚠ rsvg-convert failed; trying the Chrome fallback...');
   }
 
   // fallback: headless Chrome
@@ -427,7 +427,7 @@ function generateBaseline(cacheDir, data) {
   ].find(c => run(`which "${c}"`) || fs.existsSync(c));
 
   if (!chrome) {
-    console.log('  ✗ 无可用渲染器 (需要 rsvg-convert 或 Chrome)');
+    console.log('  ✗ No usable renderer is available (requires rsvg-convert or Chrome)');
     return null;
   }
 
@@ -443,38 +443,38 @@ function generateBaseline(cacheDir, data) {
   const chromeResult = run(`"${chrome}" --headless=new --disable-gpu --no-sandbox --screenshot="${pngPath}" --window-size=${cssW},${cssH} --force-device-scale-factor=2 --hide-scrollbars "file://${path.resolve(svgPath)}"`);
   if (fs.existsSync(pngPath)) {
     const size = fs.statSync(pngPath).size;
-    console.log(`  ✓ baseline 生成 (chrome): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
+    console.log(`  ✓ Baseline generated (Chrome): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
     emitPreview(pngPath);
     return pngPath;
   }
 
-  console.log('  ✗ baseline 生成失败');
+  console.log('  ✗ Failed to generate a baseline');
   return null;
 }
 
-// === Step 5: 汇总 ===
+// === Step 5: summary ===
 function summary(agentResult, warnings, baselinePath) {
-  console.log('\n[5/5] 汇总');
+  console.log('\n[5/5] Summary');
   console.log('─'.repeat(50));
 
   const node = agentResult?.bridge?.node;
   const target = agentResult?.bridge?.target;
-  console.log(`  节点: ${node?.name || 'unknown'} (${node?.id || ''})`);
-  console.log(`  类型: ${node?.type || ''}`);
+  console.log(`  Node: ${node?.name || 'unknown'} (${node?.id || ''})`);
+  console.log(`  Type: ${node?.type || ''}`);
   if (target?.url) {
-    console.log(`  链接: ${target.url}`);
+    console.log(`  Link: ${target.url}`);
   }
 
   const diag = agentResult?.bridge?.diagnostics?.designSnapshot;
   if (diag) {
     console.log(`  CSS: ${diag.css?.attached || 0}/${diag.css?.requested || 0}`);
     console.log(`  SVG: ${diag.svg?.attached || 0}/${diag.svg?.requested || 0}`);
-    console.log(`  图片: ${diag.imageAssets?.resolved || 0}/${diag.imageAssets?.requested || 0}`);
+    console.log(`  Images: ${diag.imageAssets?.resolved || 0}/${diag.imageAssets?.requested || 0}`);
   }
 
   const high = warnings.filter(w => w.level === 'HIGH');
   if (high.length > 0) {
-    console.log(`\n  ⚠ ${high.length} 条 HIGH 级警告，写代码前必须处理:`);
+    console.log(`\n  ⚠ ${high.length} HIGH-severity warnings must be handled before writing code:`);
     for (const w of high) {
       console.log(`    - ${w.node}: ${w.issue}`);
     }
@@ -482,7 +482,7 @@ function summary(agentResult, warnings, baselinePath) {
 
   if (baselinePath) {
     console.log(`\n  baseline: ${baselinePath}`);
-    console.log(`  验收: python3 ./scripts/fidelity_scorecard.py --baseline ${baselinePath} --candidate <截图> --mode region`);
+  console.log(`  Acceptance: python3 ./scripts/fidelity_scorecard.py --baseline ${baselinePath} --candidate <screenshot> --mode region`);
   }
 
   console.log('─'.repeat(50));
@@ -523,8 +523,8 @@ async function main() {
   const url = argv.filter((a) => !a.startsWith('--')).join(' ').trim();
   const auto = flags.has('--auto') || flags.has('--codegen');
   if (!url) {
-    console.log('用法: node ./scripts/figma_pipeline.mjs [--auto] "<figma-url-or-node-id>"');
-    console.log('  --auto   extract + render_ready + codegen + verify_loop 一条龙');
+    console.log('Usage: node ./scripts/figma_pipeline.mjs [--auto] "<figma-url-or-node-id>"');
+    console.log('  --auto   run extract + render_ready + codegen + verify_loop end-to-end');
     process.exit(1);
   }
 
@@ -535,14 +535,14 @@ async function main() {
 
   const resolvedUrl = agentResult.bridge?.target?.url || url;
   if (resolvedUrl !== url) {
-    console.log(`  → 解析到完整链接: ${resolvedUrl}`);
+    console.log(`  → Resolved full URL: ${resolvedUrl}`);
   }
 
   const cacheDir = agentResult.bridge?.cacheDir
     || agentResult.cacheDir;
 
   if (!cacheDir) {
-    console.error('无法确定 cache 目录');
+    console.error('Could not determine the cache directory');
     process.exit(1);
   }
 
@@ -555,13 +555,13 @@ async function main() {
   if (agentPayload) {
     const enriched = enrichComputedCss(agentPayload, cacheDir, payloadPath);
     if (enriched > 0) {
-      console.log(`\n[1.8/5] 渐变 CSS 已计算: ${enriched} 个节点挂载 computedCss.background`);
+      console.log(`\n[1.8/5] Gradient CSS computed: ${enriched} nodes now carry computedCss.background`);
     }
     const tokens = enrichTokens(agentPayload, cacheDir, payloadPath);
     if (tokens.nodesEnriched > 0 || tokens.variablesMapped > 0) {
       console.log(
-        `\n[1.9/5] 变量绑定: ${tokens.nodesEnriched} 个节点挂载 computedCss.tokens，` +
-          `variables-substitution-map.json 含 ${tokens.variablesMapped} 条`
+        `\n[1.9/5] Variable bindings: ${tokens.nodesEnriched} nodes now carry computedCss.tokens, ` +
+          `and variables-substitution-map.json contains ${tokens.variablesMapped} entries`
       );
     }
     // Step 1.10: aggregate full computedCss + computedHtml per node so the
@@ -581,8 +581,8 @@ async function main() {
     if (fullEnriched > 0) {
       const inlined = ccCtx.inlinedSvgs || 0;
       console.log(
-        `\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml` +
-        (inlined > 0 ? `（其中 ${inlined} 个 SVG 已 inline）` : '')
+        `\n[1.10/5] Full computedCss: ${fullEnriched} nodes now carry computedCss.full / computedHtml` +
+        (inlined > 0 ? ` (${inlined} SVGs were inlined)` : '')
       );
     }
 
@@ -597,9 +597,9 @@ async function main() {
     const extGeoMb = extGeo ? (extGeo.bytesRemoved / 1024 / 1024).toFixed(2) : '0.00';
     if (extInf?.nodes || extGeo?.nodes) {
       console.log(
-        `\n[1.11/5] 外部化 sidecar:` +
-        (extInf?.nodes ? ` variables.inferred (${extInf.nodes} 节点, -${extInfMb}MB) → variables-inferred.json;` : '') +
-        (extGeo?.nodes ? ` vector.geometry (${extGeo.nodes} 节点, -${extGeoMb}MB) → blobs/geom-*.json` : '')
+        `\n[1.11/5] Externalized sidecars:` +
+        (extInf?.nodes ? ` variables.inferred (${extInf.nodes} nodes, -${extInfMb}MB) -> variables-inferred.json;` : '') +
+        (extGeo?.nodes ? ` vector.geometry (${extGeo.nodes} nodes, -${extGeoMb}MB) -> blobs/geom-*.json` : '')
       );
     }
 
@@ -659,7 +659,7 @@ async function main() {
       console.log(`\n[artifact] outline.json (${outline.totalNodes} nodes, ${sizeKb}KB): ${outlinePath}`);
     }
   } catch (e) {
-    console.log(`\n[artifact] outline.json 生成失败: ${e.message}`);
+    console.log(`\n[artifact] outline.json generation failed: ${e.message}`);
   }
 
   summary(agentResult, warnings, baselinePath);

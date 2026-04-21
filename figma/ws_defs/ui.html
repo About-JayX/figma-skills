@@ -18,12 +18,12 @@
 </style>
 </head>
 <body>
-<div id="bridge" class="loading">Bridge SSE 连接中...</div>
-<div id="status" class="loading">初始化中...</div>
-<div id="hint">插件默认不会自动提取。只有收到 Bridge 的 extract-node-defs / extract-image-asset 指令时才会执行并回传结果。</div>
-<button id="reconnect-button" type="button">重新连接 SSE</button>
-<button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">获取选中节点 ID</button>
-<div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="点击复制"></div>
+<div id="bridge" class="loading">Connecting to Bridge SSE...</div>
+<div id="status" class="loading">Initializing...</div>
+<div id="hint">The plugin does not extract automatically by default. It only runs and returns results after receiving a Bridge command such as extract-node-defs or extract-image-asset.</div>
+<button id="reconnect-button" type="button">Reconnect SSE</button>
+<button id="get-node-id-button" type="button" style="margin-top:6px;background:#2563eb">Get selected node ID</button>
+<div id="node-id" style="margin-top:6px;padding:6px 10px;border-radius:6px;background:#f6f8fa;font-family:monospace;font-size:11px;color:#333;display:none;word-break:break-all;cursor:pointer" title="Click to copy"></div>
 <div id="log"></div>
 <script>
 // AUTO-GENERATED FILE. DO NOT EDIT.
@@ -41,14 +41,14 @@
       "resultTransport": {
         "chunkSizeBytes": 524288,
         "maxChunkBytes": 524288,
-        "maxTotalBytes": 52428800,
-        "maxChunkCount": 100
+        "maxTotalBytes": 2147483648,
+        "maxChunkCount": 4096
       },
       "blobTransport": {
         "chunkSizeBytes": 524288,
         "maxChunkBytes": 524288,
-        "maxTotalBytes": 134217728,
-        "maxChunkCount": 256
+        "maxTotalBytes": 2147483648,
+        "maxChunkCount": 4096
       }
     }
   );
@@ -86,7 +86,7 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       }).then((res) => {
         if (res.ok) {
           const label = fileKey || documentName || "(unknown)";
-          onBridgeStatus("Bridge SSE 已连接 (fileKey: " + label + ")", "ok");
+          onBridgeStatus("Bridge SSE connected (fileKey: " + label + ")", "ok");
         }
       }).catch(() => {
       });
@@ -107,13 +107,13 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
       try {
         const payload = JSON.parse(event.data || "{}");
         if (!payload.jobId) {
-          onBridgeStatus("收到无效 job，已忽略", "error");
+          onBridgeStatus("Received an invalid job and ignored it", "error");
           return;
         }
-        onBridgeStatus("收到 " + eventName + " job " + payload.jobId, "ok");
+        onBridgeStatus("Received " + eventName + " job " + payload.jobId, "ok");
         forwardBridgeCommand2(forwardType, payload);
       } catch {
-        onBridgeStatus("Bridge 事件解析失败", "error");
+        onBridgeStatus("Failed to parse a Bridge event", "error");
       }
     }
     function connect() {
@@ -121,10 +121,10 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
         eventSource.close();
       }
       currentClientId = null;
-      onBridgeStatus("Bridge SSE 连接中...", "loading");
+      onBridgeStatus("Connecting to Bridge SSE...", "loading");
       eventSource = new EventSource(eventsUrl);
       eventSource.addEventListener("ready", (event) => {
-        onBridgeStatus("Bridge SSE 已连接", "ok");
+        onBridgeStatus("Bridge SSE connected", "ok");
         try {
           const data = JSON.parse(event.data || "{}");
           if (data.clientId) {
@@ -149,7 +149,7 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
         );
       });
       eventSource.onerror = () => {
-        onBridgeStatus("Bridge SSE 已断开，等待重连...", "error");
+        onBridgeStatus("Bridge SSE disconnected, waiting to reconnect...", "error");
         currentClientId = null;
       };
     }
@@ -214,16 +214,16 @@ var BRIDGE_EVENTS_URL = globalThis.BRIDGE_EVENTS_URL;
         nodeIdEl.textContent = lines.join("\n");
         nodeIdEl.style.background = "#e3f9e5";
         nodeIdEl.style.whiteSpace = "pre-wrap";
-        appendLog("选中节点: " + lines.join(", "));
+        appendLog("Selected nodes: " + lines.join(", "));
       } else {
-        nodeIdEl.textContent = "未选中任何节点";
+        nodeIdEl.textContent = "No nodes are currently selected";
         nodeIdEl.style.background = "#ffeef0";
       }
     }
     async function copyNodeIdText() {
       if (nodeIdEl.textContent) {
         await navigator.clipboard.writeText(nodeIdEl.textContent);
-        appendLog("已复制: " + nodeIdEl.textContent);
+        appendLog("Copied: " + nodeIdEl.textContent);
       }
     }
     return {

@@ -33,10 +33,10 @@ node ./skills/figma/scripts/bridge_client.mjs health
 
 | # | Check | Expected outcome |
 |---|-------|-----------------|
-| 1 | Plugin UI loads | Import `ws_defs/manifest.json`, run plugin → no white screen; status area shows "已就绪" or equivalent ready text |
-| 2 | SSE connects | Plugin status changes from "连接中" → "已连接"; `bridge_client.mjs health` shows `pluginConnections > 0` |
-| 3 | SSE reconnect button | Click "重新连接 SSE" → status briefly shows "连接中", recovers to "已连接"; health still `pluginConnections > 0` |
-| 4 | Node ID button | Select a canvas node, click "获取选中节点 ID" → node ID or Figma URL appears and is copyable |
+| 1 | Plugin UI loads | Import `ws_defs/manifest.json`, run plugin -> no white screen; status area shows "Ready" or equivalent ready text |
+| 2 | SSE connects | Plugin status changes from "Connecting" -> "Connected"; `bridge_client.mjs health` shows `pluginConnections > 0` |
+| 3 | SSE reconnect button | Click "Reconnect SSE" -> status briefly shows "Connecting", then recovers to "Connected"; health still `pluginConnections > 0` |
+| 4 | Node ID button | Select a canvas node, click "Get selected node ID" -> node ID or Figma URL appears and is copyable |
 | 5 | extract-node-defs | `node ./skills/figma/scripts/bridge_client.mjs agent "<figma-node-url>"` → `ok: true`, defs returned, cache populated |
 | 6 | extract-image-asset (small) | `node ./skills/figma/scripts/bridge_client.mjs asset "<figma-node-url>" "<hash>"` → `ok: true`, file written to `assets/`, `byteLength` present |
 | 7 | oversized image preflight | Same command with an image clearly > 3200×3200 → `ok: false`, `status: 413`, `errorCode: "IMAGE_TOO_LARGE_ESTIMATED"`, `details.pixelCount` and `details.assetMaxPixels` present; plugin UI does not freeze |

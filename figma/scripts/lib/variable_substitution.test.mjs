@@ -13,9 +13,9 @@ test('figmaNameToCssVar: standard names', () => {
   assert.equal(figmaNameToCssVar('font-size/text-xs'), '--font-size-text-xs');
 });
 
-test('figmaNameToCssVar: Chinese characters preserved as Unicode', () => {
-  assert.equal(figmaNameToCssVar('圆角参数/CR0-无圆角'), '--圆角参数-cr0-无圆角');
-  assert.equal(figmaNameToCssVar('间距/SP0'), '--间距-sp0');
+test('figmaNameToCssVar: escaped Unicode survives normalization', () => {
+  assert.equal(figmaNameToCssVar('\u5706\u89d2\u53c2\u6570/CR0-\u65e0\u5706\u89d2'), '--\u5706\u89d2\u53c2\u6570-cr0-\u65e0\u5706\u89d2');
+  assert.equal(figmaNameToCssVar('\u95f4\u8ddd/SP0'), '--\u95f4\u8ddd-sp0');
 });
 
 test('figmaNameToCssVar: invalid returns null', () => {

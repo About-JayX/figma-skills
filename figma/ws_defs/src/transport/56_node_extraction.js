@@ -13,7 +13,7 @@ async function buildNodeExtraction(rootNode, options, reportStage) {
   const paintDiagnostics = createPaintDiagnostics();
 
   if (reportStage) {
-    reportStage.loading('extract.preflight', '扫描节点与变量引用', {
+    reportStage.loading('extract.preflight', 'Scanning nodes and variable references', {
       rootNodeId: rootNode && rootNode.id ? rootNode.id : null,
       rootNodeType: rootNode && rootNode.type ? rootNode.type : null,
       subtreeNodes: subtreeNodes.length,
@@ -28,11 +28,11 @@ async function buildNodeExtraction(rootNode, options, reportStage) {
   const variableIds = Array.from(aliasIds);
 
   if (reportStage) {
-    reportStage.ok('extract.preflight.done', '节点扫描完成', {
+    reportStage.ok('extract.preflight.done', 'Node scan complete', {
       subtreeNodes: subtreeNodes.length,
       variableIds: variableIds.length,
     });
-    reportStage.loading('extract.variables.start', '变量解析中', {
+    reportStage.loading('extract.variables.start', 'Resolving variables', {
       variables: variableIds.length,
     });
   }
@@ -97,11 +97,11 @@ async function buildNodeExtraction(rootNode, options, reportStage) {
   }
 
   if (reportStage) {
-    reportStage.ok('extract.variables.done', '变量解析完成', {
+    reportStage.ok('extract.variables.done', 'Variable resolution complete', {
       variables: variableIds.length,
       unresolvedAliasIds: unresolvedAliasIds.length,
     });
-    reportStage.loading('extract.snapshot.start', '结构化场景序列化中', {
+    reportStage.loading('extract.snapshot.start', 'Serializing structured scene snapshot', {
       subtreeNodes: subtreeNodes.length,
     });
   }
@@ -131,7 +131,7 @@ async function buildNodeExtraction(rootNode, options, reportStage) {
   );
 
   if (reportStage) {
-    reportStage.ok('extract.snapshot.done', '结构化场景序列化完成', {
+    reportStage.ok('extract.snapshot.done', 'Structured scene serialization complete', {
       imageResources:
         designSnapshot &&
         designSnapshot.resources &&

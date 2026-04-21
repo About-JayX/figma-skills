@@ -10,19 +10,19 @@ async function handleExtractImageAsset(command) {
   const reportStage = createJobStatusReporter(jobId, command);
 
   if (!jobId) {
-    throw createPluginError('INVALID_TARGET', '缺少 jobId');
+    throw createPluginError('INVALID_TARGET', 'Missing jobId');
   }
 
   if (!imageHash) {
-    throw createPluginError('INVALID_IMAGE_HASH', '缺少 imageHash');
+    throw createPluginError('INVALID_IMAGE_HASH', 'Missing imageHash');
   }
 
-  reportStage.loading('asset.job.start', '图片资产 job ' + jobId + ' 启动', {
+  reportStage.loading('asset.job.start', 'Image asset job ' + jobId + ' started', {
     imageHash: imageHash,
   });
   const asset = await extractImageAssetByHash(imageHash, extractionOptions, reportStage);
   await postJobAsset(jobId, asset, reportStage);
-  reportStage.ok('asset.job.done', '图片资产 job ' + jobId + ' 已回传', {
+  reportStage.ok('asset.job.done', 'Image asset job ' + jobId + ' returned', {
     imageHash: imageHash,
     byteLength: asset.byteLength,
     format: asset.format,

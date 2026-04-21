@@ -1,61 +1,73 @@
-# 07 — Tokens & Variables
+# 07 — Tokens and Variables
 
-把 Figma 变量绑定转成 CSS 自定义属性（`var(--xxx)`），支持多主题 / 多 mode 回放。
+This file defines how to preserve Figma variable bindings as CSS custom properties in reproduction output.
 
-## 何时使用
+## When to Use This
 
-- 节点属性通过 `node.variables.bound.<prop>` 绑定了变量（**必须**输出 `var(--xxx)` 而非硬编码值）
-- 消费方代码库已有 token 层（Design System 的 `--color-brand-500` 等）
-- 设计稿有 Light / Dark / 多品牌 mode，需要 CSS 变量切换
+Use this when:
 
-## 数据源
+- a node property is explicitly bound through `node.variables.bound.<prop>`
+- the consuming codebase already has a token layer
+- the design has multiple modes (light/dark/brand variants)
 
-三层：
+## Data Sources
 
-| 源 | 内容 | 用途 |
-|----|------|------|
-| `node.variables.bound.<prop>` | 单节点的显式绑定（数组 / 单对象）| 这个属性用哪个变量 |
-| `node.variables.inferred.<prop>` | Figma 推断的匹配 | **仅参考，不强转**（多候选场景会误匹配）|
-| `variables-substitution-map.json`（cache 根目录）| 全局变量名 → CSS 变量名 + 多 mode 解析值 | 生成 `:root` 里的定义 + 多 mode 切换 |
-| `node.computedCss.tokens`（pipeline 富集）| `{ [cssProp]: { cssVar, figmaProp, variable } }` | 写节点 CSS 时直接取 `var(cssVar)` |
+Three layers matter:
 
-## 消费流程
+| Source | Meaning | Use |
+|---|---|---|
+| `node.variables.bound.<prop>` | explicit per-node variable binding | primary binding source |
+| `node.variables.inferred.<prop>` | Figma’s inferred suggestions | informational only; do not force-convert blindly |
+| `variables-substitution-map.json` | global variable-name -> CSS-variable map with per-mode values | emit `:root` variables and mode overrides |
+| `node.computedCss.tokens` | pipeline-enriched token mapping by CSS prop | direct node-level `var(--...)` emission |
 
-### 1. 生成全局 `:root` 变量定义
+## Consumption Flow
 
-从 `variables-substitution-map.json` 读全部条目：
+### 1. Emit Global `:root` Variables
+
+Use `variables-substitution-map.json` to emit global variables:
 
 ```css
 :root {
-  --color-brand-500: #0066ff;        /* mode: Light */
-  --color-neutrals-950: #0a0a0a;     /* mode: Light */
+  --color-brand-500: #0066ff;
+  --color-neutrals-950: #0a0a0a;
   --font-size-text-xs: 12px;
   --spacing-sp-0: 0px;
-  /* ... */
 }
 
 [data-theme="dark"] {
-  --color-brand-500: #5599ff;        /* mode: Dark */
+  --color-brand-500: #5599ff;
   --color-neutrals-950: #f5f5f5;
 }
 ```
 
-生成脚本：读 substitution-map 的 `values[modeName]`，按 mode 拆 selector。
+### 2. Use Token-Bound Properties at the Node Level
 
-### 2. 节点级使用
+If `computedCss.tokens[cssProp]` exists, emit:
 
-节点属性若有 `computedCss.tokens[cssProp]`，**CSS 输出 `var(<cssVar>)` 而非硬编码**。
-
-```jsx
-/* 原：{ color: '#0a0a0a', fontSize: '12px' } */
-/* 正确：{ color: 'var(--color-neutrals-950)', fontSize: 'var(--font-size-text-xs)' } */
+```css
+var(--token-name)
 ```
 
-### 3. Figma 属性 → CSS 属性映射（由 pipeline 自动处理）
+instead of a hard-coded literal value.
 
-| Figma binding prop | CSS prop |
-|-------------------|---------|
-| `fills` | `color` (for TEXT) / `background-color` (else) |
+### 3. Parallel Outputs
+
+The pipeline may expose:
+
+- `computedCss.full` — resolved pixel-faithful values
+- `computedCss.withTokens` — equivalent output with `var(--...)` substitutions
+
+Use:
+
+- `full` for pure visual lock / screenshot-faithful work
+- `withTokens` when theme-aware output is part of the goal
+
+## Figma Binding Property -> CSS Property Mapping
+
+| Figma binding property | CSS property |
+|---|---|
+| `fills` | `color` (TEXT) / `background-color` (containers) |
 | `strokes` | `border-color` |
 | `fontSize` | `font-size` |
 | `fontWeight` | `font-weight` |
@@ -65,32 +77,34 @@
 | `itemSpacing` | `gap` |
 | `paddingTop/Right/Bottom/Left` | `padding-*` |
 | `topLeftRadius` / `topRightRadius` / `bottomLeftRadius` / `bottomRightRadius` | `border-*-radius` |
-| `strokeWeight` / `strokeTopWeight` 等 | `border-width` / `border-*-width` |
+| `strokeWeight` / per-side stroke weights | `border-width` / `border-*-width` |
 | `opacity` | `opacity` |
-| `minWidth` / `maxWidth` / `minHeight` / `maxHeight` | 同名 |
-| `paragraphSpacing` / `paragraphIndent` | `margin-bottom` / `text-indent` |
+| `minWidth` / `maxWidth` / `minHeight` / `maxHeight` | same-named CSS properties |
+| `paragraphSpacing` / `paragraphIndent` | paragraph gap / `text-indent` |
 
-## CSS 变量命名
+## CSS Variable Naming Rules
 
-Figma 变量名按如下规则转 CSS：
+Figma variable names should be normalized into CSS custom properties using these rules:
 
-1. 保留大小写敏感的 ASCII 字母并小写化
-2. 保留 Unicode（包括 CJK）
-3. 连字符、斜杠、空格、标点合并为单个 `-`
-4. 前导 / 尾随 `-` 去除
-5. 前缀 `--`
+1. ASCII letters are lowercased
+2. Unicode is preserved
+3. slashes, spaces, and punctuation collapse into `-`
+4. leading/trailing `-` are trimmed
+5. every final name is prefixed with `--`
 
-例：
-- `Color/neutrals/950` → `--color-neutrals-950`
-- `Line Height/text-xs` → `--line-height-text-xs`
-- `间距参数/SP0` → `--间距参数-sp0`
-- `边框/L2-强调边框,分割色-10%` → `--边框-l2-强调边框-分割色-10`
+Examples:
 
-CSS 规范允许自定义属性用 Unicode 字符，Chrome/Safari/Firefox 都支持。
+- `Color/neutrals/950` -> `--color-neutrals-950`
+- `Line Height/text-xs` -> `--line-height-text-xs`
+- Unicode names remain valid CSS custom properties
 
-## 多 mode 切换
+Unicode is allowed here. The important rule is consistency, not forced ASCII-only slugs.
 
-### 通过 `data-theme` 属性
+## Multi-Mode Switching
+
+Two common patterns:
+
+### `data-theme`
 
 ```html
 <html data-theme="dark">
@@ -99,11 +113,10 @@ CSS 规范允许自定义属性用 Unicode 字符，Chrome/Safari/Firefox 都支
 ```css
 [data-theme="dark"] {
   --color-neutrals-950: #f5f5f5;
-  /* ... */
 }
 ```
 
-### 通过 `@media (prefers-color-scheme: dark)`
+### `prefers-color-scheme`
 
 ```css
 @media (prefers-color-scheme: dark) {
@@ -113,21 +126,21 @@ CSS 规范允许自定义属性用 Unicode 字符，Chrome/Safari/Firefox 都支
 }
 ```
 
-两种方式可以叠加——先看用户偏好，用户可手动覆盖。
+These approaches can coexist.
 
-## 未解析 / 冲突场景
+## Unresolved / Conflict Cases
 
-| 场景 | 处理 |
-|------|------|
-| 变量 `values` 某 mode 缺失 | 用 `defaultModeId` 的值，或报告警告 |
-| `computedCss.tokens[prop]` 存在但 CSS 变量名冲突（命名 collision） | pipeline 应报警；手动重命名变量或加 scope 前缀 |
-| `inferred` 有多个候选 | **不自动选择**，agent 输出 `/* inferred: <list> — confirm before substituting */` 并保留硬编码 |
-| 消费方代码库 token 名与 Figma 不一致 | pipeline 支持 `token-alias.json`（未来）；当前手动 map |
+| Situation | Handling |
+|---|---|
+| a mode is missing a value | fall back to the default mode or report a warning |
+| token name collision / naming conflict | report the collision; rename or scope intentionally |
+| multiple inferred candidates | do not auto-convert inferred bindings blindly |
+| consumer token names differ from Figma names | use an aliasing layer or explicit mapping |
 
-## 自检
+## Self-Check
 
-- [ ] 凡是 `computedCss.tokens[prop]` 存在的节点属性，CSS 都输出了 `var(<cssVar>)`
-- [ ] `:root` 里有所有用到的变量定义
-- [ ] 多 mode 场景每个 mode 都有对应 selector 覆盖
-- [ ] `inferred` 绑定没强转为 `var()`
-- [ ] CSS 变量名在浏览器 DevTools 能查到且值正确
+- [ ] every property with `computedCss.tokens[prop]` emits `var(--...)`
+- [ ] `:root` contains every used variable
+- [ ] mode overrides are emitted when the design has multiple modes
+- [ ] inferred-only bindings were not silently forced into CSS vars
+- [ ] naming collisions or conflicts are explicitly handled

@@ -90,7 +90,7 @@ async function ensureBridge() {
     ok: false,
     startedBridge: true,
     pid,
-    error: 'bridge 启动失败或未在预期时间内响应 /health',
+    error: 'Bridge failed to start or did not respond to /health in time',
   };
 }
 
@@ -98,14 +98,14 @@ function buildPluginInstallHint() {
   return {
     status: 'plugin_required',
     message:
-      '未检测到活动的 ws_defs 插件连接。请先在 Figma Desktop 导入并运行 ./ws_defs 插件，再重试 bridge 请求。',
+      'No active ws_defs plugin connection was detected. Import and run the ./ws_defs plugin in Figma Desktop, then retry the bridge request.',
     pluginName: 'ws_defs',
     manifestPath: path.join(SKILL_ROOT, 'ws_defs', 'manifest.json'),
     steps: [
-      '在 Figma Desktop 打开 Plugins -> Development -> Import plugin from manifest...',
-      '选择 ./ws_defs/manifest.json',
-      '打开目标设计文件后手动运行 ws_defs 插件',
-      '确认插件 UI 显示 Bridge SSE 已连接，再重试当前命令',
+      'In Figma Desktop, open Plugins -> Development -> Import plugin from manifest...',
+      'Select ./ws_defs/manifest.json',
+      'Open the target design file and run the ws_defs plugin manually',
+      'Confirm the plugin UI shows that Bridge SSE is connected, then retry the command',
     ],
   };
 }
@@ -177,7 +177,7 @@ function resolveFileKeyFromHealth(input, health) {
 
   // If any connection hasn't registered a fileKey yet, we can't be sure of the routing
   if (unregistered > 0 && connections > 1) {
-    return { fileKey: null, ambiguous: true, availableFileKeys: uniqueKeys, reason: `${unregistered} 个连接尚未注册 fileKey` };
+    return { fileKey: null, ambiguous: true, availableFileKeys: uniqueKeys, reason: `${unregistered} connections have not registered a fileKey yet` };
   }
   // Exactly one unique fileKey across all connections — unambiguous
   if (uniqueKeys.length === 1) {
@@ -189,7 +189,7 @@ function resolveFileKeyFromHealth(input, health) {
   }
   // No fileKeys registered at all
   if (connections > 1) {
-    return { fileKey: null, ambiguous: true, availableFileKeys: [], reason: '多个连接均未注册 fileKey' };
+    return { fileKey: null, ambiguous: true, availableFileKeys: [], reason: 'Multiple connections have not registered a fileKey' };
   }
   return { fileKey: null, ambiguous: false };
 }
@@ -203,12 +203,12 @@ async function runExtract(input) {
   const resolved = resolveFileKeyFromHealth(input, ensured.health);
   if (resolved.ambiguous) {
     const detail = resolved.reason
-      || `当前已连接的 fileKey: ${resolved.availableFileKeys.join(', ')}`;
+      || `Currently connected fileKeys: ${resolved.availableFileKeys.join(', ')}`;
     return {
       ok: false,
       startedBridge: ensured.startedBridge,
       health: ensured.health,
-      error: `裸 node-id 输入在多插件场景下无法消歧。${detail}。请传入完整 Figma URL。`,
+      error: `A bare node-id is ambiguous in a multi-plugin session. ${detail}. Please pass a full Figma URL.`,
       errorCode: 'AMBIGUOUS_FILEKEY',
     };
   }
@@ -242,15 +242,15 @@ async function runAssetFetch(targetInput, imageHash) {
   if (!ensured.ok) return ensured;
 
   const target = parseTarget(targetInput);
-  if (!target) return { ok: false, error: '无法解析目标节点' };
+  if (!target) return { ok: false, error: 'Could not resolve the target node' };
 
   const resolved = resolveFileKeyFromHealth(targetInput, ensured.health);
   if (resolved.ambiguous) {
     const detail = resolved.reason
-      || `当前已连接的 fileKey: ${resolved.availableFileKeys.join(', ')}`;
+      || `Currently connected fileKeys: ${resolved.availableFileKeys.join(', ')}`;
     return {
       ok: false,
-      error: `裸 node-id 输入在多插件场景下无法消歧。${detail}。请传入完整 Figma URL。`,
+      error: `A bare node-id is ambiguous in a multi-plugin session. ${detail}. Please pass a full Figma URL.`,
       errorCode: 'AMBIGUOUS_FILEKEY',
       target,
     };
@@ -336,7 +336,7 @@ function usage() {
   return {
     ok: false,
     error:
-      '用法: node ./scripts/bridge_client.mjs <health|ensure|extract|agent|asset> [figma-link-or-node-id] [image-hash]',
+      'Usage: node ./scripts/bridge_client.mjs <health|ensure|extract|agent|asset> [figma-link-or-node-id] [image-hash]',
   };
 }
 
@@ -349,7 +349,7 @@ async function main() {
     const health = await getHealth();
     output = health
       ? { ok: true, health }
-      : { ok: false, error: 'bridge 未启动或 /health 不可达' };
+      : { ok: false, error: 'Bridge is not running or /health is unreachable' };
   } else if (command === 'ensure') {
     output = await ensureBridge();
   } else if (command === 'extract') {
@@ -373,7 +373,7 @@ async function main() {
     const targetInput = parts[0] || '';
     const imageHash = parts[1] || '';
     if (!targetInput || !imageHash) {
-      output = { ok: false, error: '用法: asset <figma-url> <image-hash>' };
+      output = { ok: false, error: 'Usage: asset <figma-url> <image-hash>' };
     } else {
       output = await runAssetFetch(targetInput, imageHash);
     }

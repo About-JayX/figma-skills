@@ -18,7 +18,7 @@
 //   }
 
 // CSS custom properties allow most Unicode (including CJK). We preserve CJK
-// as-is so var(--色值-950) round-trips legibly; only ASCII letters get
+// as-is so non-ASCII variable names round-trip legibly; only ASCII letters get
 // lowercased, and runs of punctuation/whitespace collapse to a single dash.
 export function figmaNameToCssVar(name) {
   if (typeof name !== 'string' || name.length === 0) return null;

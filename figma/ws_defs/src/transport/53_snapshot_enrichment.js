@@ -20,7 +20,7 @@ async function enrichDesignSnapshotAsync(rootNode, designSnapshot, subtreeNodes,
   };
 
   if (reportStage) {
-    reportStage.loading('extract.css.start', 'CSS 提取中', {
+    reportStage.loading('extract.css.start', 'Extracting CSS', {
       nodes: subtreeNodes.length,
     });
   }
@@ -53,8 +53,8 @@ async function enrichDesignSnapshotAsync(rootNode, designSnapshot, subtreeNodes,
   );
 
   if (reportStage) {
-    reportStage.ok('extract.css.done', 'CSS 提取完成', diagnostics.css);
-    reportStage.loading('extract.svg.start', 'SVG fallback 提取中', {
+    reportStage.ok('extract.css.done', 'CSS extraction complete', diagnostics.css);
+    reportStage.loading('extract.svg.start', 'Extracting SVG fallback data', {
       nodes: subtreeNodes.length,
     });
   }
@@ -110,7 +110,7 @@ async function enrichDesignSnapshotAsync(rootNode, designSnapshot, subtreeNodes,
   );
 
   if (reportStage) {
-    reportStage.ok('extract.svg.done', 'SVG fallback 提取完成', diagnostics.svg);
+    reportStage.ok('extract.svg.done', 'SVG fallback extraction complete', diagnostics.svg);
   }
 
   const imageAssetResult = await resolveImageAssets(

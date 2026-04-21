@@ -152,8 +152,8 @@ function testUtf8RoundTrip() {
   });
 
   const original = JSON.stringify({
-    message: '这是一段中文测试文本 🎨 with mixed ASCII',
-    data: Array(50).fill('设计稿变量名称').join('|'),
+      message: 'This is an escaped Unicode test payload \uD83C\uDFA8 with mixed ASCII',
+      data: Array(50).fill('design-token-name').join('|'),
   });
 
   const encoded = Buffer.from(original, 'utf8');

@@ -8,13 +8,13 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
   };
 
   if (reportStage) {
-    reportStage.loading('extract.rest.start', 'REST 快照提取中', null);
+    reportStage.loading('extract.rest.start', 'Extracting REST snapshot', null);
   }
 
   if (!rootNode || typeof rootNode.exportAsync !== 'function') {
     diagnostics.error = 'EXPORT_UNSUPPORTED';
     if (reportStage) {
-      reportStage.error('extract.rest.unsupported', 'REST 快照不支持', diagnostics);
+      reportStage.error('extract.rest.unsupported', 'REST snapshot export is not supported', diagnostics);
     }
     return {
       snapshot: null,
@@ -39,7 +39,7 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
     if (mergedOptions.restMaxBytes && diagnostics.bytes > mergedOptions.restMaxBytes) {
       diagnostics.truncated = true;
       if (reportStage) {
-        reportStage.ok('extract.rest.done', 'REST 快照提取完成', diagnostics);
+        reportStage.ok('extract.rest.done', 'REST snapshot extraction complete', diagnostics);
       }
       return {
         snapshot: {
@@ -53,7 +53,7 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
     }
 
     if (reportStage) {
-      reportStage.ok('extract.rest.done', 'REST 快照提取完成', diagnostics);
+      reportStage.ok('extract.rest.done', 'REST snapshot extraction complete', diagnostics);
     }
     return {
       snapshot: snapshot,
@@ -62,7 +62,7 @@ async function exportRestSnapshot(rootNode, options, reportStage) {
   } catch (error) {
     diagnostics.error = error instanceof Error ? error.message : String(error);
     if (reportStage) {
-      reportStage.error('extract.rest.failed', 'REST 快照提取失败', diagnostics);
+      reportStage.error('extract.rest.failed', 'REST snapshot extraction failed', diagnostics);
     }
     return {
       snapshot: null,

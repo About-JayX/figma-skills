@@ -25,7 +25,7 @@ async function executeJob(command) {
       text:
         'job ' +
         jobId +
-        ' 失败: ' +
+        ' failed: ' +
         normalizedError.message +
         (lastStatus && lastStatus.stage ? ' | lastStage=' + lastStatus.stage : ''),
       state: 'error',
@@ -53,7 +53,7 @@ async function executeJob(command) {
           text:
             'job ' +
             jobId +
-            ' 回传失败: ' +
+            ' callback failed: ' +
             (callbackError instanceof Error ? callbackError.message : String(callbackError)),
           state: 'error',
         });

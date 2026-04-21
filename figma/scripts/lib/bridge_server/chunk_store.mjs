@@ -21,12 +21,12 @@ export function appendChunkedBody(state, key, chunkIndexHeader, chunkTotalHeader
       totalTooLargeCode: 'RESULT_CHUNK_TOTAL_TOO_LARGE',
       chunkTotalMismatchCode: 'CHUNK_TOTAL_MISMATCH',
       missingChunkCode: 'MISSING_CHUNK',
-      invalidHeadersMessage: '分块头不合法',
-      chunkCountExceededMessage: '结果分块数超出上限',
-      chunkTooLargeMessage: '结果单块超出上限',
-      totalTooLargeMessage: '结果累计字节超出上限',
-      chunkTotalMismatchMessage: '分块总数不一致',
-      missingChunkMessage: '分块不完整',
+      invalidHeadersMessage: 'Invalid chunk headers',
+      chunkCountExceededMessage: 'Chunk count exceeds the limit',
+      chunkTooLargeMessage: 'Chunk size exceeds the limit',
+      totalTooLargeMessage: 'Total chunk bytes exceed the limit',
+      chunkTotalMismatchMessage: 'Chunk totals do not match',
+      missingChunkMessage: 'Chunk set is incomplete',
     },
     limits || {}
   );

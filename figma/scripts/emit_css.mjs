@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stage 3 — Mechanical CSS emitter.
-// Reads render-ready.json and produces a "毛坯" App.css: one rule per node (by className).
+// Reads render-ready.json and produces a mechanical App.css: one rule per node (by className).
 // Uses renderReady's pre-computed effectiveGap (so the 3.9 geometric bug is fixed by design).
 //
 // Usage: emit_css.mjs <render-ready.json> <out.css>

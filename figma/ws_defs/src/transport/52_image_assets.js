@@ -29,7 +29,7 @@ function assertImageWithinPreflightLimits(asset, options) {
 
   throw createPluginError(
     'IMAGE_TOO_LARGE_ESTIMATED',
-    '图片尺寸预估超限，跳过二进制读取',
+    'Estimated image dimensions exceed the limit; skipping binary read',
     {
       imageHash: asset.imageHash,
       width: asset.width,
@@ -68,7 +68,7 @@ async function resolveImageAssets(imageResources, options, reportStage) {
   };
 
   if (reportStage) {
-    reportStage.loading('extract.images.start', '图片资源元数据处理中', {
+    reportStage.loading('extract.images.start', 'Processing image asset metadata', {
       hashes: imageRecords.length,
       transferMode: diagnostics.transferMode,
     });
@@ -76,7 +76,7 @@ async function resolveImageAssets(imageResources, options, reportStage) {
 
   if (imageRecords.length === 0 || typeof figma.getImageByHash !== 'function') {
     if (reportStage) {
-      reportStage.ok('extract.images.done', '图片资源元数据处理完成', diagnostics);
+      reportStage.ok('extract.images.done', 'Image asset metadata processing complete', diagnostics);
     }
     return {
       assets: assets,
@@ -138,7 +138,7 @@ async function resolveImageAssets(imageResources, options, reportStage) {
   );
 
   if (reportStage) {
-    reportStage.ok('extract.images.done', '图片资源元数据处理完成', diagnostics);
+    reportStage.ok('extract.images.done', 'Image asset metadata processing complete', diagnostics);
   }
 
   return {
@@ -150,18 +150,18 @@ async function resolveImageAssets(imageResources, options, reportStage) {
 async function extractImageAssetByHash(imageHash, options, reportStage) {
   const mergedOptions = Object.assign({}, DEFAULT_EXTRACTION_OPTIONS, options || {});
   if (!imageHash || typeof figma.getImageByHash !== 'function') {
-    throw createPluginError('INVALID_IMAGE_HASH', '缺少合法的 imageHash');
+    throw createPluginError('INVALID_IMAGE_HASH', 'Missing a valid imageHash');
   }
 
   if (reportStage) {
-    reportStage.loading('asset.lookup.start', '定位图片资产中', {
+    reportStage.loading('asset.lookup.start', 'Locating image asset', {
       imageHash: imageHash,
     });
   }
 
   const image = figma.getImageByHash(imageHash);
   if (!image) {
-    throw createPluginError('IMAGE_NOT_FOUND', '未找到 imageHash ' + imageHash);
+    throw createPluginError('IMAGE_NOT_FOUND', 'Could not find imageHash ' + imageHash);
   }
 
   const asset = {
@@ -191,7 +191,7 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
   }
 
   if (reportStage) {
-    reportStage.ok('asset.lookup.done', '图片资产定位完成', {
+    reportStage.ok('asset.lookup.done', 'Image asset located', {
       imageHash: imageHash,
       width: asset.width,
       height: asset.height,
@@ -204,7 +204,7 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
     if (reportStage) {
       reportStage.error(
         'asset.preflight.rejected',
-        '图片尺寸预估超限，跳过二进制读取',
+        'Estimated image dimensions exceed the limit; skipping binary read',
         preflightError.details
       );
     }
@@ -212,7 +212,7 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
   }
 
   if (reportStage) {
-    reportStage.loading('asset.bytes.start', '图片二进制读取中', {
+    reportStage.loading('asset.bytes.start', 'Reading image binary bytes', {
       imageHash: imageHash,
     });
   }
@@ -223,13 +223,13 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
     'Image.getBytesAsync'
   );
   if (!bytes || typeof bytes.length !== 'number' || bytes.length === 0) {
-    throw createPluginError('IMAGE_BYTES_EMPTY', '图片字节为空: ' + imageHash);
+    throw createPluginError('IMAGE_BYTES_EMPTY', 'Image bytes are empty: ' + imageHash);
   }
 
   if (mergedOptions.assetMaxBytes && bytes.length > mergedOptions.assetMaxBytes) {
     throw createPluginError(
       'IMAGE_TOO_LARGE',
-      '图片字节超出上限: ' + bytes.length + ' > ' + mergedOptions.assetMaxBytes,
+      'Image bytes exceed the limit: ' + bytes.length + ' > ' + mergedOptions.assetMaxBytes,
       {
         imageHash: imageHash,
         byteLength: bytes.length,
@@ -245,7 +245,7 @@ async function extractImageAssetByHash(imageHash, options, reportStage) {
   asset.mimeType = format.mimeType;
 
   if (reportStage) {
-    reportStage.ok('asset.bytes.done', '图片二进制读取完成', {
+    reportStage.ok('asset.bytes.done', 'Image binary read complete', {
       imageHash: imageHash,
       byteLength: asset.byteLength,
       format: asset.format,

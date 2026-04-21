@@ -206,12 +206,12 @@ function buildMergeSummaryMarkdown(merged) {
   lines.push(`- mcpOnly: ${merged.diff.variables.mcpOnlyCount}`);
   lines.push('');
   lines.push('## Guidance');
-  lines.push('- bridge 默认提供 designSnapshot 真源、inspect css 提示、restSnapshot 对账和条件 svg 兜底。');
-  lines.push('- 布局、渐变、描边、多层 paints、vector 和 live variable 绑定优先用 bridge。');
-  lines.push('- screenshot、assets、Code Connect、远程结构化补充优先用 MCP。');
-  lines.push('- 复杂 fill 先看 bridge.designSnapshot.root.style + node.css；需要对账时再看 bridge.response.restSnapshot。');
-  lines.push('- 如果 MCP 某项缺失，不阻塞 bridge 数据用于代码实现。');
-  lines.push('- 如果 bridge 缺少截图或组件映射，不要臆测，补 MCP。');
+  lines.push('- Bridge is the default source of truth for designSnapshot, inspect-css hints, restSnapshot reconciliation, and conditional SVG fallback.');
+  lines.push('- Prefer Bridge for layout, gradients, strokes, layered paints, vectors, and live variable bindings.');
+  lines.push('- Prefer MCP for screenshots, assets, Code Connect, and remote structured supplements.');
+  lines.push('- For complex fills, inspect bridge.designSnapshot.root.style + node.css first; only read bridge.response.restSnapshot when reconciliation is needed.');
+  lines.push('- Missing MCP data should not block implementation when Bridge data is sufficient.');
+  lines.push('- If Bridge lacks screenshots or component mapping, do not guess; supplement with MCP.');
   lines.push('');
   return `${lines.join('\n')}\n`;
 }
@@ -220,7 +220,7 @@ function usage() {
   return {
     ok: false,
     error:
-      '用法: node ./scripts/merge_cache.mjs <figma-link|cache-dir>',
+      'Usage: node ./scripts/merge_cache.mjs <figma-link|cache-dir>',
   };
 }
 
@@ -244,7 +244,7 @@ function main() {
       JSON.stringify(
         {
           ok: false,
-          error: `cache 目录不存在: ${cacheDir}`,
+          error: `Cache directory does not exist: ${cacheDir}`,
         },
         null,
         2

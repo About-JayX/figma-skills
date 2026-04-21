@@ -103,10 +103,10 @@ def resolve_path(manifest_dir: Path, value: str, bundle_root: Optional[Path]) ->
 def load_manifest(path: Path) -> Tuple[Dict[str, Any], List[EntryResolution]]:
     manifest = read_json(path)
     if not isinstance(manifest, dict):
-        raise ValueError("manifest 必须是 JSON object")
+        raise ValueError("manifest must be a JSON object")
     entries_raw = manifest.get("entries")
     if not isinstance(entries_raw, list) or not entries_raw:
-        raise ValueError("manifest.entries 必须是非空数组")
+        raise ValueError("manifest.entries must be a non-empty array")
 
     manifest_dir = path.parent.resolve()
     bundle_root_value = manifest.get("bundleRoot")
@@ -115,11 +115,11 @@ def load_manifest(path: Path) -> Tuple[Dict[str, Any], List[EntryResolution]]:
     resolutions: List[EntryResolution] = []
     for index, raw in enumerate(entries_raw):
         if not isinstance(raw, dict):
-            raise ValueError(f"entries[{index}] 不是 object")
+            raise ValueError(f"entries[{index}] is not an object")
         baseline_value = raw.get("baseline")
         candidate_value = raw.get("candidate")
         if not isinstance(baseline_value, str) or not isinstance(candidate_value, str):
-            raise ValueError(f"entries[{index}] 缺少 baseline/candidate 路径")
+            raise ValueError(f"entries[{index}] is missing baseline/candidate paths")
         entry_id = str(raw.get("id") or raw.get("regionId") or raw.get("nodeId") or f"entry-{index+1}")
         mode = str(raw.get("mode") or raw.get("kind") or "region")
         kind = str(raw.get("kind") or mode)
@@ -258,7 +258,7 @@ def build_actions(entry: EntryResolution, report: Dict[str, Any]) -> List[Dict[s
                     "useAbsoluteBounds": True,
                     "absoluteRenderBounds": True,
                 },
-                "reason": "baseline 与 candidate 尺寸不一致，优先排查裁切与真实渲染边界",
+                "reason": "Baseline and candidate sizes do not match; investigate cropping and real render bounds first",
             }
         )
 
@@ -266,7 +266,7 @@ def build_actions(entry: EntryResolution, report: Dict[str, Any]) -> List[Dict[s
         actions.append(
             {
                 "type": "SYNC_COLOR_AND_EFFECTS",
-                "reason": "颜色或特效偏差超阈值，优先对齐 token / opacity / effects / colorProfile",
+                "reason": "Color or effect drift exceeds the threshold; align tokens, opacity, effects, and colorProfile first",
                 "metrics": {
                     "delta_e_p95": metrics.get("delta_e00", {}).get("p95"),
                     "delta_e_max": metrics.get("delta_e00", {}).get("max"),
@@ -279,14 +279,14 @@ def build_actions(entry: EntryResolution, report: Dict[str, Any]) -> List[Dict[s
             actions.append(
                 {
                     "type": "FIX_TEXT_METRICS",
-                    "reason": "几何/结构偏差超阈值，检查 text wrap、baseline、font loading、OpenType、paragraph metrics",
+                "reason": "Geometry or structure drift exceeds the threshold; inspect text wrap, baseline, font loading, OpenType, and paragraph metrics",
                 }
             )
         else:
             actions.append(
                 {
                     "type": "FIX_LAYOUT_METRICS",
-                    "reason": "几何/结构偏差超阈值，检查 sizing、gap、padding、grid/span、anchor",
+                "reason": "Geometry or structure drift exceeds the threshold; inspect sizing, gap, padding, grid/span, and anchor behavior",
                 }
             )
 
@@ -299,7 +299,7 @@ def build_actions(entry: EntryResolution, report: Dict[str, Any]) -> List[Dict[s
                     "svgSimplifyStroke": False,
                     "useAbsoluteBounds": True,
                 },
-                "reason": "hard node 存在 mask/复杂描边/图形信号，优先保证视觉一致性",
+                "reason": "The hard node contains mask / complex stroke / graphic signals, so visual consistency should take priority",
             }
         )
 
@@ -307,7 +307,7 @@ def build_actions(entry: EntryResolution, report: Dict[str, Any]) -> List[Dict[s
         actions.append(
             {
                 "type": "MANUAL_REVIEW",
-                "reason": "已升级到最高兜底路线，仍未通过阈值，需要人工判读或更换实现策略",
+                "reason": "The node has already reached the highest fallback route and still fails the threshold; manual review or a different implementation strategy is required",
             }
         )
 

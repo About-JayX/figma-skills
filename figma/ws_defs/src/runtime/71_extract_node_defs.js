@@ -8,33 +8,33 @@ async function handleExtractNodeDefs(command) {
   const reportStage = createJobStatusReporter(jobId, command);
 
   if (!jobId) {
-    throw createPluginError('INVALID_TARGET', '缺少 jobId');
+    throw createPluginError('INVALID_TARGET', 'Missing jobId');
   }
 
   if (!target || !target.nodeId) {
-    throw createPluginError('INVALID_TARGET', '缺少 nodeId');
+    throw createPluginError('INVALID_TARGET', 'Missing nodeId');
   }
 
   var effectiveIncludeInvisible = extractionOptions && typeof extractionOptions.includeInvisibleInstanceChildren === 'boolean'
     ? extractionOptions.includeInvisibleInstanceChildren
     : DEFAULT_EXTRACTION_OPTIONS.includeInvisibleInstanceChildren;
-  reportStage.loading('job.start', 'job ' + jobId + ' 启动', {
+  reportStage.loading('job.start', 'job ' + jobId + ' started', {
     nodeId: target && target.nodeId ? target.nodeId : null,
     includeInvisibleInstanceChildren: effectiveIncludeInvisible,
   });
 
-  reportStage.loading('job.resolve-node.start', '定位目标节点中', {
+  reportStage.loading('job.resolve-node.start', 'Resolving target node', {
     nodeId: target.nodeId,
   });
   const node = await findNodeByIdWithLazyPageLoading(target.nodeId, extractionOptions);
   if (!node) {
     throw createPluginError(
       'NODE_NOT_FOUND',
-      '未找到 nodeId ' + target.nodeId + '，请确认当前打开的是正确的 Figma 文件'
+      'Could not find nodeId ' + target.nodeId + '. Confirm that the correct Figma file is open.'
     );
   }
 
-  reportStage.ok('job.resolve-node.done', '目标节点定位完成', {
+  reportStage.ok('job.resolve-node.done', 'Target node resolved', {
     nodeId: node.id,
     nodeType: node.type,
     nodeName: node.name || null,
@@ -57,7 +57,7 @@ async function handleExtractNodeDefs(command) {
   };
   if (BASELINE_EXPORTABLE_TYPES[node.type] && typeof node.exportAsync === 'function') {
     try {
-      reportStage.loading('baseline.export.start', 'baseline PNG 导出中', {
+      reportStage.loading('baseline.export.start', 'Exporting baseline PNG', {
         nodeId: node.id,
         nodeType: node.type,
       });
@@ -79,20 +79,20 @@ async function handleExtractNodeDefs(command) {
           },
           reportStage
         );
-        reportStage.ok('baseline.export.done', 'baseline PNG 已上传', {
+        reportStage.ok('baseline.export.done', 'Baseline PNG uploaded', {
           nodeId: node.id,
           byteLength: pngBytes.length,
         });
       }
     } catch (baselineError) {
-      reportStage.ok('baseline.export.skipped', 'baseline PNG 导出失败，跳过', {
+      reportStage.ok('baseline.export.skipped', 'Baseline PNG export failed and was skipped', {
         nodeId: node.id,
         error: baselineError && baselineError.message ? baselineError.message : String(baselineError),
       });
     }
   }
 
-  reportStage.ok('job.extract.done', '提取阶段完成，准备回传', {
+  reportStage.ok('job.extract.done', 'Extraction completed; preparing result upload', {
     defsTotal: defs && defs.summary ? defs.summary.total : null,
     imageAssets:
       extraction &&
@@ -128,8 +128,8 @@ async function handleExtractNodeDefs(command) {
   };
 
   await postJobResult(jobId, payload, reportStage);
-  reportStage.ok('job.done', 'job ' + jobId + ' 已回传 ' + defs.summary.total + ' 个 defs', {
+  reportStage.ok('job.done', 'job ' + jobId + ' returned ' + defs.summary.total + ' defs', {
     defsTotal: defs.summary.total,
   });
-  figma.notify('job ' + jobId + ' 已回传 defs', { timeout: 1500 });
+  figma.notify('job ' + jobId + ' returned defs', { timeout: 1500 });
 }

@@ -10,7 +10,7 @@ export async function handleJobAssetRequest(state, req, res, jobId) {
     req.resume();
     writeJson(res, 404, {
       ok: false,
-      error: `未找到待处理 job ${jobId}，资产上传被拒绝`,
+      error: `No pending job ${jobId} was found; asset upload was rejected`,
       errorCode: 'JOB_NOT_FOUND',
     });
     return;
@@ -22,7 +22,7 @@ export async function handleJobAssetRequest(state, req, res, jobId) {
   } catch (error) {
     writeJson(res, 400, {
       ok: false,
-      error: error instanceof Error ? error.message : '图片资产读取失败',
+      error: error instanceof Error ? error.message : 'Failed to read the image asset payload',
       errorCode: error && error.code ? error.code : 'ASSET_READ_FAILED',
     });
     return;

@@ -19,7 +19,7 @@ export async function handleJobBlobRequest(state, req, res, jobId) {
     req.resume();
     writeJson(res, 404, {
       ok: false,
-      error: `未找到待处理 job ${jobId}，blob 上传被拒绝`,
+      error: `No pending job ${jobId} was found; blob upload was rejected`,
       errorCode: 'JOB_NOT_FOUND',
     });
     return;
@@ -45,7 +45,7 @@ export async function handleJobBlobRequest(state, req, res, jobId) {
     } catch (error) {
       writeJson(res, 400, {
         ok: false,
-        error: error instanceof Error ? error.message : 'blob 分块读取失败',
+        error: error instanceof Error ? error.message : 'Failed to read the blob chunk',
         errorCode: error && error.code ? error.code : 'BLOB_READ_FAILED',
       });
       return;
@@ -116,7 +116,7 @@ export async function handleJobBlobRequest(state, req, res, jobId) {
   } catch (error) {
     writeJson(res, 400, {
       ok: false,
-      error: error instanceof Error ? error.message : 'blob 读取失败',
+      error: error instanceof Error ? error.message : 'Failed to read the blob payload',
       errorCode: error && error.code ? error.code : 'BLOB_READ_FAILED',
     });
     return;

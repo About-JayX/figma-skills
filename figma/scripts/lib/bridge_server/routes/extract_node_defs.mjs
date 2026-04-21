@@ -20,7 +20,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
   } catch (error) {
     writeJson(res, 400, {
       ok: false,
-      error: '请求体不是合法 JSON',
+      error: 'Request body is not valid JSON',
       errorCode: 'INVALID_JSON',
     });
     return;
@@ -30,7 +30,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
   if (!target) {
     writeJson(res, 400, {
       ok: false,
-      error: '无法解析输入，请传入 Figma link 或 node id',
+      error: 'Could not parse the input. Pass a Figma URL or node id',
       errorCode: 'INVALID_TARGET',
     });
     return;
@@ -45,7 +45,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
     writeJson(res, 409, {
       ok: false,
       target,
-      error: `没有匹配 fileKey "${effectiveFileKey}" 的插件连接。当前连接的 fileKey: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(未注册)').join(', ')}`,
+      error: `No plugin connection matches fileKey "${effectiveFileKey}". Current fileKeys: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(unregistered)').join(', ')}`,
       errorCode: 'FILEKEY_MISMATCH',
     });
     return;
@@ -54,7 +54,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
     writeJson(res, 409, {
       ok: false,
       target,
-      error: `多插件场景下无 fileKey，无法确定路由。当前连接的 fileKey: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(未注册)').join(', ')}。请传 Figma URL 或 body.fileKey。`,
+      error: `Routing is ambiguous in a multi-plugin session without a fileKey. Current fileKeys: ${Array.from(state.pluginClients.values()).map(c => c.fileKey || '(unregistered)').join(', ')}. Pass a Figma URL or body.fileKey.`,
       errorCode: 'AMBIGUOUS_ROUTING',
     });
     return;
@@ -63,7 +63,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
     writeJson(res, 409, {
       ok: false,
       target,
-      error: '未检测到活动的 ws_defs 插件连接',
+      error: 'No active ws_defs plugin connection was detected',
       errorCode: 'NO_PLUGIN_CONNECTION',
     });
     return;
@@ -87,7 +87,7 @@ export async function handleExtractNodeDefsRequest(state, req, res) {
       ok: false,
       target,
       jobId: job.jobId,
-      error: errorMessageOf(error, 'Bridge 请求失败'),
+      error: errorMessageOf(error, 'Bridge request failed'),
       errorCode: errorCodeOf(error, 'PLUGIN_TIMEOUT'),
     });
   }

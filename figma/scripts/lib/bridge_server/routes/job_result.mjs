@@ -17,7 +17,7 @@ function normalizeJobResult(state, job, payload) {
       ? Object.assign({}, payload)
       : {
           ok: false,
-          error: '插件回传结果格式不正确',
+          error: 'The plugin returned an invalid result payload',
           errorCode: 'INVALID_RESULT',
         };
 
@@ -55,7 +55,7 @@ export async function handleJobResultRequest(state, req, res, jobId) {
   if (!job) {
     writeJson(res, 404, {
       ok: false,
-      error: `未找到待处理 job ${jobId}`,
+      error: `No pending job ${jobId} was found`,
       errorCode: 'JOB_NOT_FOUND',
     });
     return;
@@ -76,10 +76,10 @@ export async function handleJobResultRequest(state, req, res, jobId) {
       const errorCode = error && error.code ? error.code : 'INVALID_CHUNK_BODY';
       const statusCode = errorCode === 'RESULT_CHUNK_TOO_LARGE' ? 413 : 400;
 
-      job.reject(Object.assign(new Error('分块请求体读取失败'), { code: errorCode }));
+      job.reject(Object.assign(new Error('Failed to read the chunked request body'), { code: errorCode }));
       writeJson(res, statusCode, {
         ok: false,
-        error: '分块请求体读取失败',
+        error: 'Failed to read the chunked request body',
         errorCode,
       });
       return;
@@ -117,10 +117,10 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     try {
       payload = JSON.parse(chunkState.body);
     } catch (error) {
-      job.reject(Object.assign(new Error('分块重组后 JSON 解析失败'), { code: 'INVALID_JSON' }));
+      job.reject(Object.assign(new Error('Failed to parse JSON after chunk reassembly'), { code: 'INVALID_JSON' }));
       writeJson(res, 400, {
         ok: false,
-        error: '分块重组后 JSON 解析失败',
+        error: 'Failed to parse JSON after chunk reassembly',
         errorCode: 'INVALID_JSON',
       });
       return;
@@ -144,10 +144,10 @@ export async function handleJobResultRequest(state, req, res, jobId) {
     const errorCode = error && error.code ? error.code : 'INVALID_JSON';
     const statusCode = errorCode === 'JSON_BODY_TOO_LARGE' ? 413 : 400;
 
-    job.reject(Object.assign(new Error('结果回传不是合法 JSON'), { code: errorCode }));
+    job.reject(Object.assign(new Error('Returned result is not valid JSON'), { code: errorCode }));
     writeJson(res, statusCode, {
       ok: false,
-      error: '结果回传不是合法 JSON',
+      error: 'Returned result is not valid JSON',
       errorCode,
     });
     return;

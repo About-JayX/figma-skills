@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { JOB_TIMEOUT_MS } from '../bridge_config.mjs';
 
 function createTimeoutError() {
-  return Object.assign(new Error('插件未在预期时间内返回提取结果'), {
+  return Object.assign(new Error('The plugin did not return extraction results within the expected time'), {
     code: 'PLUGIN_TIMEOUT',
   });
 }

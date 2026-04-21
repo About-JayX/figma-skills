@@ -11,7 +11,7 @@ async function main() {
 
   figma.ui.postMessage({
     type: 'status',
-    text: '已就绪，等待 Bridge 下发 extract-node-defs / extract-image-asset 指令',
+    text: 'Ready and waiting for Bridge commands: extract-node-defs / extract-image-asset',
     state: 'ok',
   });
 }
@@ -39,7 +39,7 @@ figma.ui.onmessage = async (msg) => {
     } catch (error) {
       figma.ui.postMessage({
         type: 'status',
-        text: '初始化失败: ' + (error instanceof Error ? error.message : String(error)),
+        text: 'Initialization failed: ' + (error instanceof Error ? error.message : String(error)),
         state: 'error',
       });
     }
@@ -49,8 +49,7 @@ figma.ui.onmessage = async (msg) => {
 startupPromise.catch((error) => {
   figma.ui.postMessage({
     type: 'status',
-    text: '初始化失败: ' + (error instanceof Error ? error.message : String(error)),
+    text: 'Initialization failed: ' + (error instanceof Error ? error.message : String(error)),
     state: 'error',
   });
 });
-

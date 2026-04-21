@@ -1,158 +1,182 @@
-# 01 — Data Sources：agent-payload 字段权威表
+# 01 — Data Sources: Authoritative Field Map for the Agent Payload
 
-所有字段出自 `bridge-agent-payload.json`（pipeline 产出的精简版，不是 `bridge-response.json`）。字段存在性按 type 区分——FRAME 有 layout，TEXT 多一层 text。
+All fields in this guide come from `bridge-agent-payload.json`, which is the enriched, post-pipeline working payload. Do **not** default to `bridge-response.json` for normal work; it is larger, noisier, and only needed for exceptional drill-down.
 
-## 读取顺序（硬规定）
+Field availability is type-sensitive:
+
+- FRAME-like nodes carry layout and appearance fields
+- TEXT nodes add a text layer
+- VECTOR-like nodes add geometry/SVG-related fields
+- INSTANCE / COMPONENT nodes add component contract fields
+
+## Required Read Order
+
+Consume node data in this order. Do not reorder it.
 
 1. `node.id` / `node.type` / `node.name` / `node.visible` / `node.style.opacity`
-2. `node.layout.*`（几何）
-3. `node.style.*`（外观）
-4. `node.text.*`（只对 TEXT）
-5. `node.vector.*`（只对 VECTOR / BOOLEAN_OPERATION / STAR / POLYGON / LINE）
-6. `node.component.*`（只对 INSTANCE / COMPONENT）
-7. `node.variables.bound` / `node.computedCss.tokens`（token 场景）
-8. `node.computedCss.*`（pipeline 富集产出，优先级最高，见下）
-9. `node.children[]`（递归）
+2. `node.layout.*`
+3. `node.style.*`
+4. `node.text.*` (TEXT only)
+5. `node.vector.*` (VECTOR / BOOLEAN_OPERATION / STAR / POLYGON / LINE only)
+6. `node.component.*` (INSTANCE / COMPONENT only)
+7. `node.variables.bound` / `node.computedCss.tokens`
+8. `node.computedCss.*`
+9. `node.children[]`
 
-`node.computedCss.*` 是 pipeline 为消除 agent 再推理而产出的**终值**字段，存在即用，不再回去重算。
+If `node.computedCss.*` exists, it is a pipeline-produced final value. Use it directly instead of recomputing it.
 
-## Layout（几何层）
+## Layout Layer
 
-| 字段 | 含义 | CSS 对应 | 注意 |
-|------|------|---------|------|
-| `layout.absoluteBoundingBox.{x,y,width,height}` | 含 stroke 的绝对盒 | width / height 权威源 | 嵌套 FILL 场景此值比 `layout.width/height` 准 |
-| `layout.absoluteRenderBounds.{x,y,width,height}` | 含 effects 溢出 | 父若 `overflow: visible` 时实际绘制边界 | 边缘对齐以此为准 |
-| `layout.layoutMode` | `VERTICAL` / `HORIZONTAL` / `NONE` | → `05-layout-modes.md` 决策树 | `NONE` = 绝对定位，不是顺序流 |
-| `layout.itemSpacing` | auto-layout 主轴 gap | `gap` | |
-| `layout.counterAxisSpacing` | wrap 时副轴 gap | `row-gap` | |
-| `layout.paddingTop/Right/Bottom/Left` | 内边距 | `padding` | |
-| `layout.layoutSizingHorizontal/Vertical` | `FIXED` / `FILL` / `HUG` | FIXED→显式 width/height；FILL→`align-self:stretch` 或 `flex:1 0 0`；HUG→auto | |
-| `layout.layoutAlign` / `layoutGrow` | 子在父内的对齐/拉伸 | `align-self` / `flex-grow` | |
-| `layout.clipsContent` | 是否裁剪 | `overflow: hidden` / `visible` | |
-| `layout.relativeTransform` | 父内相对变换（2x3 仿射） | 旋转节点用 `transform: rotate` 或矩阵 | 非单位矩阵时不要信 `node.css.radial-gradient` |
-| `layout.gridRowCount` / `gridColumnCount` / `gridRowSizes` / `gridColumnSizes` / `gridRowGap` / `gridColumnGap` | grid 容器定义 | `display:grid` + `grid-template-*` | 存在即走 grid 档 |
-| `layout.gridRowSpan` / `gridColumnSpan` / `gridRowAnchorIndex` / `gridColumnAnchorIndex` | grid 子定义 | `grid-column` / `grid-row` + `span` | |
-| `layout.minWidth/maxWidth/minHeight/maxHeight` | 尺寸约束 | 同名 CSS 属性 | |
-| `layout.constraints.horizontal/vertical` | Figma 约束（MIN/MAX/CENTER/STRETCH/SCALE）| 绝对定位时 MIN=`left`, MAX=`right`, CENTER=居中, STRETCH=`left+right` | 仅在 layoutMode: NONE 下相关 |
-| `layout.strokeTopWeight` 等 | 单边描边粗细 | `border-*-width` | 取代 `style.strokeWeight` |
-| `layout.inferredAutoLayout` | Figma 推断的 auto layout | 当 `layoutMode: NONE` 但视觉上是行/列时，可升级到 flex | 只有 `replay.routeHint` 允许才用 |
+| Field | Meaning | Typical CSS use | Notes |
+|---|---|---|---|
+| `layout.absoluteBoundingBox.{x,y,width,height}` | Authoritative absolute box including stroke | size / absolute positioning | More trustworthy than `layout.width/height` in nested FILL cases |
+| `layout.absoluteRenderBounds.{x,y,width,height}` | Actual painted bounds including effect overflow | overflow and visual alignment | Use when effects extend outside the layout box |
+| `layout.layoutMode` | `VERTICAL`, `HORIZONTAL`, `NONE` | flex / absolute / grid decision | `NONE` means free positioning, not ordinary flow |
+| `layout.itemSpacing` | primary-axis spacing | `gap` | |
+| `layout.counterAxisSpacing` | wrapped secondary-axis spacing | `row-gap` / `column-gap` | |
+| `layout.paddingTop/Right/Bottom/Left` | internal padding | `padding` | |
+| `layout.layoutSizingHorizontal/Vertical` | `FIXED`, `FILL`, `HUG` | width / height / stretch / flex | |
+| `layout.layoutAlign` / `layoutGrow` | child alignment and growth inside parent | `align-self`, `flex-grow` | |
+| `layout.clipsContent` | clipping behavior | `overflow` | |
+| `layout.relativeTransform` | 2x3 affine transform in parent space | `transform` / rotation handling | Be careful with rotated gradients |
+| `layout.gridRowCount` / `gridColumnCount` / `gridRowSizes` / `gridColumnSizes` / `gridRowGap` / `gridColumnGap` | grid container definition | CSS grid | Presence means the grid route is available |
+| `layout.gridRowSpan` / `gridColumnSpan` / `gridRowAnchorIndex` / `gridColumnAnchorIndex` | grid child positioning | `grid-row`, `grid-column`, `span` | |
+| `layout.gridChildHorizontalAlign` / `gridChildVerticalAlign` | per-child alignment in grid | `justify-self`, `align-self` | |
+| `layout.minWidth` / `layout.maxWidth` / `layout.minHeight` / `layout.maxHeight` | size constraints | same-named CSS properties | |
+| `layout.constraints.horizontal/vertical` | Figma constraint system | responsive absolute anchoring | Mainly relevant when `layoutMode: NONE` |
+| `layout.strokeTopWeight` / `strokeRightWeight` / `strokeBottomWeight` / `strokeLeftWeight` | per-side stroke widths | `border-*-width` | Prefer these over a single uniform width when present |
+| `layout.inferredAutoLayout` | Figma-inferred auto-layout | possible `DOM_INFERRED` escalation | Use only when route logic explicitly allows it |
 
-## Style（外观层）
+## Style Layer
 
-| 字段 | 含义 | CSS 对应 | 注意 |
-|------|------|---------|------|
-| `style.opacity` | 节点整体透明度 | `opacity` | 与 fill opacity 不同 |
-| `style.blendMode` | 混合模式 | `mix-blend-mode` | `PASS_THROUGH` 不写 |
-| `style.fills[]` | 填充列表（可多层）| 见下 | |
-| `style.fills[].type` | `SOLID` / `GRADIENT_LINEAR` / `GRADIENT_RADIAL` / `GRADIENT_ANGULAR` / `GRADIENT_DIAMOND` / `IMAGE` / `VIDEO` / `PATTERN` | 走不同映射 | |
-| `style.fills[].visible` | 单层可见性 | `false` 则忽略这层 | |
-| `style.fills[].opacity` | 单层不透明度 | 乘到 stop / color alpha | |
-| `style.fills[].color.hex` | SOLID 颜色 HEX | `background-color` / `color` | 优先于 `color.{r,g,b}` 读 |
-| `style.fills[].gradientStops[].{position, color}` | 渐变色标 | → `06-paint-effects.md` | 手算复杂，**用 `computedCss.background`** |
-| `style.fills[].gradientTransform` | 渐变变换矩阵（2x3）| 用来求手柄真实坐标 | 同上，交给 `computedCss.background` |
-| `style.fills[].imageHash` | 图片引用 hash | `background-image: url(assets/<hash>.<format>)` | 文件位于 `cache/.../assets/` |
-| `style.fills[].scaleMode` | `FILL` / `FIT` / `CROP` / `TILE` | `cover` / `contain` / `100% 100%` / `repeat` | |
-| `style.fills[].imageTransform` | 图片变换（2x3）| `background-position` / `background-size` | |
-| `style.strokes[]` | 描边列表 | 同 fill 结构 | 渐变描边不能降级为 solid，必须 mask-composite 或渐变 bg + padding |
-| `style.strokeAlign` | `INSIDE` / `CENTER` / `OUTSIDE` | INSIDE→`box-sizing:border-box`+`border`；OUTSIDE→`outline` 或外层 wrapper | |
-| `style.effects[]` | 效果列表 | → `06-paint-effects.md` | |
-| `style.effects[].type` | `LAYER_BLUR` / `BACKGROUND_BLUR` / `DROP_SHADOW` / `INNER_SHADOW` | `filter: blur` / `backdrop-filter: blur` / `box-shadow` / inset | |
-| `style.effects[].radius` | blur/shadow 半径 **原值** | 直接用 | `node.css.filter` 的值被 Figma 除以 2，**不要用** |
-| `style.effects[].offset.{x,y}` | shadow 偏移 | `box-shadow x y` | |
-| `style.effects[].spread` | shadow 扩散 | `box-shadow spread` | |
-| `style.effects[].color` | shadow 色 | `box-shadow color` | |
-| `style.cornerRadius` | 四角均等时的单值 radius | `border-radius` | 仅均等时出现 |
-| `style.cornerRadii.{topLeft, topRight, bottomRight, bottomLeft}` | 四角不等时的嵌套对象 | `border-*-radius` | 仅四角不等时出现 |
-| `style.strokeWeight` / `style.strokeWeights.{top,right,bottom,left}` | 描边粗细（均等 / 分边）| `border-width` / `border-*-width` | |
-| `style.strokeAlign` | `INSIDE` / `CENTER` / `OUTSIDE` | INSIDE/CENTER → `border`；OUTSIDE → `outline` | |
-| `style.dashPattern` | 虚线模式数组 | 非空 → `border-style: dashed` | |
+| Field | Meaning | Typical CSS use | Notes |
+|---|---|---|---|
+| `style.opacity` | whole-node opacity | `opacity` | Separate from fill opacity |
+| `style.blendMode` | blend mode | `mix-blend-mode` | Skip `PASS_THROUGH` |
+| `style.fills[]` | fill stack | background / text color / images | Multi-layer capable |
+| `style.fills[].type` | `SOLID`, gradient types, `IMAGE`, `VIDEO`, `PATTERN` | route-specific mapping | |
+| `style.fills[].visible` | layer visibility | skip that layer | |
+| `style.fills[].opacity` | fill-layer opacity | alpha multiplication | |
+| `style.fills[].color.hex` | solid color | `background-color` / `color` | Prefer `hex` when present |
+| `style.fills[].gradientStops[].{position,color}` | gradient stop list | gradient generation | Usually replaced by `computedCss.background` |
+| `style.fills[].gradientTransform` | 2x3 transform for the gradient | advanced gradient mapping | Prefer `computedCss.background` when available |
+| `style.fills[].imageHash` | image asset key | `background-image` / asset lookup | Resolved through cache assets |
+| `style.fills[].scaleMode` | `FILL`, `FIT`, `CROP`, `TILE` | `cover`, `contain`, stretch, repeat | |
+| `style.fills[].imageTransform` | 2x3 image transform | `background-position` / `background-size` | |
+| `style.strokes[]` | stroke stack | border / outline / SVG stroke | Gradient strokes must not be silently downgraded |
+| `style.strokeAlign` | `INSIDE`, `CENTER`, `OUTSIDE` | border / outline / wrapper strategies | |
+| `style.effects[]` | effects list | blur / shadow / backdrop-filter | |
+| `style.effects[].type` | `LAYER_BLUR`, `BACKGROUND_BLUR`, `DROP_SHADOW`, `INNER_SHADOW` | effect mapping | |
+| `style.effects[].radius` | blur/shadow radius | `blur(...)`, shadow radius | Use the raw bridge value, not downgraded CSS hints |
+| `style.effects[].offset.{x,y}` | shadow offset | `box-shadow` offsets | |
+| `style.effects[].spread` | shadow spread | `box-shadow` spread | |
+| `style.effects[].color` | shadow color | `box-shadow` color | |
+| `style.cornerRadius` | uniform radius | `border-radius` | Present only when all corners are equal |
+| `style.cornerRadii.{topLeft,topRight,bottomRight,bottomLeft}` | per-corner radii | per-corner radius props | Present only when corners differ |
+| `style.strokeWeight` / `style.strokeWeights.{top,right,bottom,left}` | uniform/per-side stroke widths | border widths | |
+| `style.dashPattern` | dash pattern | dashed border / SVG stroke | |
 
-## Text（仅 TEXT 节点）
+## Text Layer (TEXT Only)
 
-| 字段 | 含义 | CSS 对应 | 注意 |
-|------|------|---------|------|
-| `text.characters` | 完整文本 | 元素内文字 | **若 segments 长度 >1，必须用 segments，不能用这个** |
-| `text.segments[]` | 按样式分段 | 逐段 `<span>` | 见 `04-text-rendering.md` |
-| `text.fontName.family/style` | 字族 + 字型 | `font-family` / `font-weight+style` | style 解析为 weight（Regular=400, Bold=700, ExtraBold=800）|
-| `text.fontSize` | 字号 | `font-size` | px |
-| `text.lineHeight.{unit, value}` | 行高 | `line-height` | `PERCENT`→`<value>%`；`PIXELS`→`<value>px`；`AUTO`→不写 |
-| `text.letterSpacing.{unit, value}` | 字距 | `letter-spacing` | `PERCENT`→`<value/100>em`；`PIXELS`→`<value>px` |
-| `text.textAlignHorizontal` | `LEFT` / `CENTER` / `RIGHT` / `JUSTIFIED` | `text-align` | |
-| `text.textAlignVertical` | `TOP` / `CENTER` / `BOTTOM` | `align-items` in flex | 或 `align-content` |
-| `text.textCase` | `UPPER` / `LOWER` / `TITLE` / `ORIGINAL` | `text-transform` | UPPER→uppercase；TITLE→capitalize |
-| `text.textDecoration` | `UNDERLINE` / `STRIKETHROUGH` / `NONE` | `text-decoration` | |
-| `text.segments[].fills[0].color.hex` | 单段颜色 | `<span>` 的 `color` | |
-| `text.segments[].hyperlink.url` | 链接 | 包 `<a href>` | |
-| `text.paragraphSpacing` / `paragraphIndent` | 段间距 / 段首缩进 | `margin-bottom` / `text-indent` | |
+| Field | Meaning | HTML / CSS use | Notes |
+|---|---|---|---|
+| `text.characters` | full text content | fallback text content | If segments exist, segments win |
+| `text.segments[]` | style runs | split spans / links | Required when multiple runs exist |
+| `text.fontName.family/style` | typeface metadata | `font-family`, `font-weight`, `font-style` | |
+| `text.fontSize` | font size | `font-size` | |
+| `text.lineHeight.{unit,value}` | line-height metadata | `line-height` | Preserve pixel / percent / auto meaning |
+| `text.letterSpacing.{unit,value}` | tracking metadata | `letter-spacing` | |
+| `text.textAlignHorizontal` | horizontal alignment | `text-align` | |
+| `text.textAlignVertical` | vertical alignment | flex parent alignment | Important in some text wrappers |
+| `text.textCase` | casing rule | `text-transform` / small caps | |
+| `text.textDecoration` | underline / strike | `text-decoration` | |
+| `text.segments[].fills[0].color.hex` | per-segment color | span-level `color` | |
+| `text.segments[].hyperlink.url` | link target | `<a href>` | |
+| `text.paragraphSpacing` | paragraph spacing | `margin-bottom` / gap | |
+| `text.paragraphIndent` | paragraph indent | `text-indent` | |
+| `text.listSpacing` / `text.listOptions` | list formatting | list spacing / list markup | |
 
-## Vector（仅矢量节点）
+## Vector Layer (Vector-Like Nodes Only)
 
-| 字段 | 含义 | 用途 |
-|------|------|------|
-| `vector.fillGeometry[].path` | 填充 SVG path | inline `<svg><path d="..." />` |
-| `vector.strokeGeometry[].path` | 描边 SVG path | 同上 |
-| `vector.vectorPaths[]` | 原始路径（布尔运算前）| VectorNetwork 未暴露时的次优 |
-| `vector.handleMirroring` | 贝塞尔 handle 行为 | 重构曲线时参考 |
-| `node.svgRef` / `node.svgString` | 完整 SVG 字符串 | 直接贴入 `<svg>`（blob 或 inline）|
+| Field | Meaning | Use |
+|---|---|---|
+| `vector.fillGeometry[].path` | SVG fill path data | inline SVG or route escalation |
+| `vector.strokeGeometry[].path` | SVG stroke path data | inline SVG or route escalation |
+| `vector.vectorPaths[]` | raw vector paths | fallback geometry source |
+| `vector.vectorNetwork` | vector network description | advanced reconstruction / diagnostics |
+| `vector.handleMirroring` | Bezier handle mirroring behavior | curve reconstruction reference |
+| `node.svgRef` / `node.svgString` | full SVG blob/string | preferred for `SVG_ISLAND` |
 
-## Computed CSS（pipeline 富集，**优先级最高**）
+## Computed CSS Layer (Highest Priority)
 
-这些字段由 pipeline 在提取后计算并回写 agent-payload，**存在即用**，禁止回去手算。
+These are final, pipeline-enriched values. If they exist, use them directly.
 
-| 字段 | 何时存在 | 内容 | 使用 |
-|------|---------|------|------|
-| `node.computedCss.background` | 节点有 `GRADIENT_*` fill | 精算好的 `linear/radial/conic-gradient(...)` 字符串 | 直接贴 `background: <value>` |
-| `node.computedCss.tokens` | 节点 `variables.bound` 非空 | `{[cssProp]: {cssVar, figmaProp, variable}}` | 对应 CSS 属性输出 `var(<cssVar>)` 而非硬编码 |
-| `node.computedCss.box` | 有 layout | `{width, height, padding, gap, minWidth, ...}` | 直接映射 CSS |
-| `node.computedCss.positioning` | 有 layout | `{mode:'flex'\|'absolute'\|'grid', flexDir, justify, align, left, top}` | `display:flex` + 其他 |
-| `node.computedCss.appearance` | 有 style | `{backgroundColor, border, borderRadius, opacity, filter, boxShadow, clipPath, maskImage}` | 直接贴 |
-| `node.computedCss.full` | 所有上面聚合 | 一个 inline 样式字符串 | `<div style="<computedCss.full>">` 直接贴，agent 零推理 |
-| `node.computedHtml` | TEXT 节点 | 预拼的 `<span>...</span><span style="color:#..."...` | 直接贴 |
+| Field | Meaning | Use |
+|---|---|---|
+| `node.computedCss.background` | final gradient/background expression | use directly |
+| `node.computedCss.tokens` | token binding map by CSS property | emit `var(--token)` where appropriate |
+| `node.computedCss.box` | size / gap / padding / min/max values | direct CSS mapping |
+| `node.computedCss.positioning` | layout mode / flex / absolute / grid metadata | direct CSS mapping |
+| `node.computedCss.appearance` | colors / borders / radius / effects | direct CSS mapping |
+| `node.computedCss.full` | full style string | highest-priority drop-in style |
+| `node.computedCss.withTokens` | token-preserving style string | use when theme-aware output matters |
+| `node.computedHtml` | prebuilt HTML fragment | especially valuable for TEXT and inline SVG |
 
-## 变量绑定
+## Variable Binding Sources
 
-| 字段 | 含义 |
-|------|------|
-| `node.variables.bound.<prop>` | 显式绑定（必须用 CSS 变量替换）|
-| `node.variables.inferred.<prop>` | Figma 推断的匹配（信息性，不强转）|
-| `variables-substitution-map.json`（cache 目录）| 变量名 → CSS 变量名 + 多 mode 值 |
+| Source | Meaning |
+|---|---|
+| `node.variables.bound.<prop>` | explicit binding that should usually become a CSS variable |
+| `node.variables.inferred.<prop>` | informational inferred suggestion; not a forced binding |
+| `variables-substitution-map.json` | variable-name -> CSS variable map with per-mode values |
 
-详见 `07-tokens-and-vars.md`。
+See `07-tokens-and-vars.md` for detailed token output rules.
 
-## 交叉校验产物
+## Cross-Validation Artifact
 
-| 文件 | 内容 |
-|------|------|
-| `cross-validation-report.json` | pipeline 跑的 HIGH/MEDIUM/INFO 警告列表 |
+| File | Meaning |
+|---|---|
+| `cross-validation-report.json` | pipeline-generated HIGH / MEDIUM / INFO warning list |
 
-**HIGH 警告必须在写代码前处理**（退回检查相关字段，确认取值来源）。
+Any `HIGH` warning must be handled before writing reproduction code.
 
-## Cache 根 sidecar（每个 `cache/<fileKey>/<nodeId>/` 下）
+## Cache Root Sidecars
 
-| 文件 | 用途 | 何时读 |
-|------|------|-------|
-| `bridge-agent-payload.json` | 完整富集 payload（9MB 级）—— 字段级权威源 | 下钻到具体节点字段时 |
-| `render-ready.json` | 扁平 / 去隐藏 / 富集后的消费格式（200KB 级） | emit_jsx / emit_css 走它 |
-| **`outline.json`** | **稀疏 tree（id/parentId/type/x/y/w/h/depth/visible），**对标 MCP `get_metadata`**。跨树推理 / 规划子树 / agent 定位节点时**第一份读的文件**（~50-400KB）** | **planning pass —— 先 outline 后下钻** |
-| **`globals.json`** | **Content-hash 去重后的 paint / stroke / effect bundle，每个节点通过 `style.fillId`/`strokeId`/`effectId` 引用。inline 数组仍保留向后兼容** | 需要按主题复用色板 / 批量查同色节点时 |
-| **`variables-inferred.json`** | **Figma 按属性猜测的候选 variable 绑定，按 nodeId 聚合。纯 informational，pipeline 本身不读** | 做 design-system 反向映射时 |
-| `variables-substitution-map.json` | token 别名 / 解析值映射 | 有 `variables.bound` 时 |
-| `cross-validation-report.json` | HIGH/MEDIUM/INFO 警告 | 写代码前 |
-| `cache-manifest.json` | 所有 cache 文件 + 资源 metadata 索引 | 查 imageHash / svgRef → 文件名 |
-| `baseline/baseline.png` + `.meta.json` | Figma 原生 2x PNG + 预览元信息 | 像素对照时 |
-| `blobs/svg-*.svg` | 大于 4KB 的 vector SVG blob | 仅被 JSX `<img>` 引用 |
-| `assets/<hash>.<ext>` | IMAGE fill 资源 | render-ready `image.path` 指向 |
+Each `cache/<fileKey>/<nodeId>/` directory may also contain:
 
-**outline.json 规则**：
-- 由 `buildOutline()` 在 bridge extract / render_ready 两处都 emit，保证非 `--auto` 模式也有
-- 包含**所有节点**（visible 字段标注可见性），用法跟 MCP `get_metadata` 一致
-- 仅作规划用途，不是字段级真源 —— 要读 fill / effects / text 等，仍必须回 `bridge-agent-payload.json`
+| File | Purpose | When to read |
+|---|---|---|
+| `bridge-agent-payload.json` | full enriched payload | field-level drill-down |
+| `render-ready.json` | flattened, ready-for-emission structure | emitters and codegen |
+| `outline.json` | sparse planning tree | planning pass before deep reads |
+| `globals.json` | deduplicated fills / strokes / effects by content hash | palette reasoning and shared-style analysis |
+| `variables-inferred.json` | externalized variable suggestions | optional design-system backfill only |
+| `variables-substitution-map.json` | token alias / resolved variable map | token-aware output |
+| `cross-validation-report.json` | validation warnings | mandatory before coding |
+| `cache-manifest.json` | resource path index | imageHash / svgRef resolution |
+| `baseline/baseline.png` + preview sidecars | verification baseline | pixel comparison |
+| `blobs/svg-*.svg` | SVG blobs | vector routes |
+| `assets/<hash>.<ext>` | image assets | image fills |
 
-**globals.json 规则**：
-- 由 `buildGlobals()` 在 enrichment 之后生成，每个 fills/strokes/effects 数组按 SHA-256 前 10 位 hash 成稳定 id（`f_xxxx` / `s_xxxx` / `e_xxxx`）
-- 节点上新增的 `style.fillId`/`strokeId`/`effectId` 是**并列字段**，与原 inline `style.fills[]` 等**同时存在**。当前 emitter 仍读 inline，新 emitter 可选 opt-in 到 id 引用
-- 用途：做 CSS 变量 / 设计系统色板生成、或批量查"有相同 fill 的所有节点"时直接查 globals 表，不用全树扫
+### `outline.json` Rules
 
-**variables-inferred.json 规则**：
-- `externalizeInferredVariables()` 把节点层 `variables.inferred` 搬到 sidecar，按 nodeId 键聚合。pipeline 本身不读（只读 `variables.bound`）—— 移出去是为了 bridge payload 瘦身（约 70% 体积）
-- 需要这份建议数据时显式 `fs.readFileSync(variables-inferred.json)` 再查 `byNodeId[<id>]`
+- emitted from both bridge extraction and `render_ready`
+- contains all nodes, even if visibility is false
+- used for planning, not as a substitute for field-level truth
+
+### `globals.json` Rules
+
+- emitted after enrichment
+- `fills` / `strokes` / `effects` are hashed into stable IDs
+- `style.fillId` / `strokeId` / `effectId` are additive; inline arrays remain available for backwards compatibility
+
+### `variables-inferred.json` Rules
+
+- produced by `externalizeInferredVariables()`
+- keyed by node ID
+- not read by the main reproduction pipeline
+- exists to reduce payload weight while preserving informational suggestions
+
+## High-Severity Rule
+
+If `cross-validation-report.json` contains `HIGH` warnings, they must be resolved before writing reproduction code.

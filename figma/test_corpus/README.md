@@ -1,33 +1,33 @@
-# Figma 回归测试样本库
+# Figma Regression Corpus
 
-存放多种风格的 Figma 设计稿作为 emit_css / render_ready / lint 等 pipeline 脚本的回归测试基准。
+This directory stores representative Figma samples used to regression-test the reproduction pipeline. The goal is not just broad visual variety, but stable, reusable coverage for `render_ready`, `emit_css`, `emit_jsx`, lint checks, and verification behavior.
 
-## 目录约定
+## Directory Convention
 
-```
+```text
 test_corpus/
-├── README.md                       ← 本文件
-├── marketing-long-page/            ← 营销长页（图多）
-│   ├── spec.json                   ← metadata（url, node-id, baseline SSIM floor 等）
-│   ├── cache/                      ← bridge extract 的完整快照
-│   └── expected/                   ← 锁定的 render-ready.json / mechanical SSIM
-├── dashboard-dense/                ← 表单 + 表格密集
-├── component-library/              ← 设计系统（多 INSTANCE / variants）
-├── icon-gallery/                   ← 图标密集（多 VECTOR）
-└── long-article/                   ← 长段落文章型
+├── README.md
+├── marketing-long-page/
+│   ├── spec.json
+│   ├── cache/
+│   └── expected/
+├── dashboard-dense/
+├── component-library/
+├── icon-gallery/
+└── long-article/
 ```
 
-## 每份样本应覆盖的 Figma 特性
+## What Each Sample Type Should Cover
 
-| 目录 | 需要覆盖的场景 |
+| Directory | Scenarios that should be covered |
 |---|---|
-| marketing-long-page | layoutWrap, 多 image fill, flex-wrap grid |
-| dashboard-dense | absolute-positioned tooltips, 表格 border, form input |
-| component-library | COMPONENT INSTANCE variants, boolean operations, shared tokens |
-| icon-gallery | 100+ VECTOR, 不同 strokeAlign, fill 色值分布 |
-| long-article | 多段 TEXT with line wrap, line-height 变体, font-family 混排 |
+| `marketing-long-page` | `layoutWrap`, many image fills, flex-wrap grids, large decorative surfaces |
+| `dashboard-dense` | absolute-positioned tooltips, table borders, form-heavy UI |
+| `component-library` | many `INSTANCE`s, variants, shared tokens, boolean/vector composition |
+| `icon-gallery` | 100+ VECTOR nodes, multiple `strokeAlign` combinations, wide fill/stroke distribution |
+| `long-article` | multi-segment TEXT, line wrapping, line-height variants, mixed font families |
 
-## 每份样本的 spec.json 示例
+## Example `spec.json`
 
 ```json
 {
@@ -38,42 +38,61 @@ test_corpus/
   "capturedAt": "2026-04-20",
   "baselineSsimFloor": {
     "mechanical": 0.8200,
-    "after_opus_refactor": 0.9300
+    "after_refactor": 0.9300
   },
   "knownPatterns": [
     "layoutWrap:WRAP on product grid",
-    "layoutMode:NONE on iPad component",
+    "layoutMode:NONE on tablet component",
     "per-side stroke dividers on list items"
   ]
 }
 ```
 
-`baselineSsimFloor` 是**这份样本当前的 SSIM 水位**。回归脚本会对比本次跑出的 SSIM ≥ floor - 0.002，低于阈值就标红（可能是 emit_css 改动引入了退步）。
+### Meaning of `baselineSsimFloor`
 
-## 如何添加一份新样本
+`baselineSsimFloor` records the currently accepted SSIM waterline for that sample. Regression runs compare the newly produced result against that floor, usually with a small tolerance. If the sample falls below that floor, the pipeline should treat it as a fidelity regression.
 
-1. 在 Figma 选中目标 node，把 URL 复制出来
-2. 跑一次提取到临时 cache：
+## How to Add a New Sample
+
+1. Select the target node in Figma and copy its URL.
+2. Extract a fresh cache:
+
    ```bash
    node skills/figma/scripts/figma_pipeline.mjs --auto "<url>"
    ```
-3. 确认 SSIM / pixel_diff 符合预期后：
+
+3. Verify that the current SSIM / pixel diff behavior is acceptable.
+4. Ingest the sample:
+
    ```bash
    node skills/figma/scripts/ingest_corpus_sample.mjs \
      --source-cache skills/figma/cache/<file>/<node> \
      --label <descriptive-name>
    ```
-   这会把 cache 复制到 `test_corpus/<label>/cache/`，抽取当前 SSIM 作为 floor 写入 `spec.json`。
-4. commit 样本目录（排除 `node_modules`）
 
-## 跑回归
+5. Commit only the intended sample metadata and expected outputs.
+
+## Running Regression
 
 ```bash
 npm run regression:corpus
 ```
 
-对所有样本并行跑 codegen + verify，对比每份的 SSIM 是否 ≥ floor。任何一份 SSIM 跌破阈值 → exit 1，CI 失败。
+The intended behavior is:
 
-## 为什么不用 git LFS
+- run codegen + verification across all registered samples
+- compare each sample against its accepted floor
+- exit non-zero if any sample regresses beyond tolerance
 
-样本目录大（每份 cache 几 MB 到几百 MB）。已加入 `.gitignore` 的 `test_corpus/*/cache/` 子路径；只 commit `spec.json` 和 `README.md`。样本数据需要**开发者之间通过其他方式同步**（云盘 / S3 / 内部共享存储）。
+## Why This Corpus Does Not Use Git LFS by Default
+
+Caches can be large. In practice, a single sample cache may range from a few megabytes to hundreds of megabytes. For that reason, corpus caches are usually treated as synced developer data rather than repository-first source of truth.
+
+The intended policy is:
+
+- keep `spec.json`
+- keep human-readable corpus documentation
+- keep only the exact expected artifacts that are intentionally versioned
+- avoid blindly checking in all extracted cache contents
+
+If the team later decides to formalize large sample storage, that should be an explicit decision rather than an accidental byproduct of committing local caches.

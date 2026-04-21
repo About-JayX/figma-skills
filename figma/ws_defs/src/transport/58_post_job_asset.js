@@ -1,10 +1,10 @@
 async function postJobAsset(jobId, asset, reportStage) {
   if (!asset || !asset.bytes || typeof asset.bytes.length !== 'number') {
-    throw createPluginError('IMAGE_BYTES_EMPTY', '缺少可回传的图片字节');
+    throw createPluginError('IMAGE_BYTES_EMPTY', 'Missing image bytes to upload');
   }
 
   if (reportStage) {
-    reportStage.loading('asset.transport.start', '图片资产回传 bridge 中', {
+    reportStage.loading('asset.transport.start', 'Posting image asset back to Bridge', {
       imageHash: asset.imageHash,
       byteLength: asset.byteLength,
       format: asset.format,
@@ -28,7 +28,7 @@ async function postJobAsset(jobId, asset, reportStage) {
   const result = await response.json();
 
   if (reportStage) {
-    reportStage.ok('asset.transport.done', '图片资产回传完成', {
+    reportStage.ok('asset.transport.done', 'Image asset upload complete', {
       imageHash: asset.imageHash,
       status: response.status,
       bridgeOk: !!(result && result.ok),
@@ -36,7 +36,7 @@ async function postJobAsset(jobId, asset, reportStage) {
   }
 
   if (!response.ok || !result.ok) {
-    throw new Error(result && result.error ? result.error : 'Bridge 图片资产回传失败');
+    throw new Error(result && result.error ? result.error : 'Bridge image asset upload failed');
   }
 
   return result;

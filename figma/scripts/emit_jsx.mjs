@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stage 3 — Mechanical JSX emitter.
-// Reads render-ready.json and produces a "毛坯" App.jsx: one div/span/img per node,
+// Reads render-ready.json and produces a mechanical App.jsx: one div/span/img per node,
 // className = n-<sanitized-id>, id attribute = sanitized id. No semantics, no sub-components.
 // The codegen_pipeline.mjs hands this to a model for refactoring.
 

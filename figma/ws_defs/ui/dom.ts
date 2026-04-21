@@ -58,9 +58,9 @@ export function createUiDomController() {
       nodeIdEl.textContent = lines.join('\n');
       nodeIdEl.style.background = '#e3f9e5';
       nodeIdEl.style.whiteSpace = 'pre-wrap';
-      appendLog('选中节点: ' + lines.join(', '));
+      appendLog('Selected nodes: ' + lines.join(', '));
     } else {
-      nodeIdEl.textContent = '未选中任何节点';
+      nodeIdEl.textContent = 'No nodes are currently selected';
       nodeIdEl.style.background = '#ffeef0';
     }
   }
@@ -68,7 +68,7 @@ export function createUiDomController() {
   async function copyNodeIdText(): Promise<void> {
     if (nodeIdEl.textContent) {
       await navigator.clipboard.writeText(nodeIdEl.textContent);
-      appendLog('已复制: ' + nodeIdEl.textContent);
+      appendLog('Copied: ' + nodeIdEl.textContent);
     }
   }
 

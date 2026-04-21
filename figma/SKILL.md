@@ -1,306 +1,356 @@
 ---
 name: figma
 description: >-
-  Figma 高精度还原。触发条件：任意 Figma URL、node ID、bridge/plugin 配置、
-  设计稿还原、视觉 diff、Figma 驱动的 UI 变更、主题变量同步。
-  bridge 优先获取 geometry/layout/fills/strokes/effects/SVG；
-  MCP 补充 screenshot/assets/code-connect。
+  Use when reproducing a Figma design from a URL or node ID, handling bridge or
+  plugin setup, running visual diff loops, applying route escalation for hard
+  nodes, or syncing Figma-driven UI changes. Use the local bridge as the
+  primary fidelity source; use MCP only as a supplement for screenshots, assets,
+  and code-connect hints.
 ---
 
-# Figma 高精度还原
+# Figma High-Fidelity Reproduction
 
-你是 Figma 设计稿到前端代码的精确还原引擎。你的唯一数据源是 bridge 提取的 `style.*` 原始数据 + pipeline 富集的 `computedCss.*` 字段。`node.css` 仅作参考，不可作为实现依据。每个节点的每个属性都必须从 bridge 数据验证后才能写入代码。
+This skill is a high-fidelity Figma-to-frontend reproduction workflow. The primary source of truth is the bridge-extracted `style.*` data plus pipeline-enriched `computedCss.*`. `node.css` is only a fallback hint and must not replace verified bridge fields.
 
-## 命令约定
+## Command Convention
 
-除非另有说明，本 skill 中的命令都从当前 skill 根目录（`skills/figma/`）执行。
+Unless stated otherwise, commands in this skill are run from the skill root:
 
-## 通用模板约束
+```bash
+skills/figma/
+```
 
-这个 skill 是**通用于多种设计稿**的还原模板，不绑定任何单一页面、单一 node 树、单一视觉风格。
+## Generic Template Constraints
 
-- 所有命令里的 `<figma-url>`、`<cache-dir>`、`<output-dir>`、`<nodeId>` 都是占位符，必须替换成**当前这次任务**的真实目标
-- 不要把某一次设计稿里的节点名、组件名、颜色、字号、布局层级，提升成 skill 规则
-- 语义化重构时，组件边界来自**当前设计稿的结构和职责**，不要复用其他页面里碰巧成立的命名
-- 输出目录、验收截图、baseline、热区分析都必须从**当前 node 对应的 cache** 推导，不能沿用上一份设计稿的产物
-- 若当前设计稿的结构与既有样例差异很大，优先保留这套流程的阶段划分与验收标准，而不是硬套某个样例的组件拆法
+This skill is a reusable template for many different designs. It must not be treated as a recipe for one specific page, one specific node tree, or one visual style.
 
-把它理解成一个“Figma URL / node ID → bridge → codegen → refactor → verify”的通用流水线模板，而不是某一份案例的操作笔记。
+- Every `<figma-url>`, `<cache-dir>`, `<output-dir>`, and `<nodeId>` placeholder must be replaced with the current task’s real target.
+- Do not turn page-specific component names, colors, typography, or structure from one reproduction into global rules.
+- Semantic component boundaries must come from the current design’s structure and responsibilities.
+- Output paths, verification screenshots, baselines, and heatmaps must always come from the current cache directory.
+- If the current design differs significantly from earlier examples, preserve the workflow and verification gates instead of forcing an old component pattern onto it.
 
-## References（按读取时机排序）
+Treat this skill as a generic:
 
-| 编号 | 文件 | 什么时候读 |
-|------|------|----------|
-| 01 | `references/01-data-sources.md` | **写代码前**。agent-payload 字段权威表，含 `computedCss.*` 富集字段 |
-| 02 | `references/02-css-reset.md` | **写代码前**。强制 CSS reset 模板，复制即用 |
-| 03 | `references/03-node-to-html.md` | **写每个节点时**。确定性消费算法，七步流程 |
-| 04 | `references/04-text-rendering.md` | 碰到 TEXT 节点时 |
-| 05 | `references/05-layout-modes.md` | 碰到任何 FRAME / SECTION / INSTANCE 时 |
-| 06 | `references/06-paint-effects.md` | 碰到 gradient / mask / shadow / blur 时 |
-| 07 | `references/07-tokens-and-vars.md` | 节点有 `variables.bound` 或需要 token 同步时 |
-| 08 | `references/08-route-escalation.md` | 命中 hard node 或 scorecard 不达标需要升级时 |
-| 09 | `references/09-verification.md` | Step 4 验收。scorecard 唯一来源 |
-| 10 | `references/10-bridge-env.md` | 遇到 bridge / plugin / cache 问题时 |
+```text
+Figma URL / node ID -> bridge -> codegen -> refactor -> verify
+```
 
----
+workflow, not as a one-off case note.
 
-## 标准 Workflow（不可跳步）
+## References
 
-当用户直接给 Figma URL / node-id 并要求“还原 / 复现 / 做 React 版”时，默认按下面 workflow 执行。这个 workflow 参考既有高保真还原流水线经验整理，目的就是**防止跳步骤导致还原性变弱**。
+Read these in order, based on the task stage:
 
-### Workflow 0 — 输入确认
+| No. | File | When to read |
+|---|---|---|
+| 01 | `references/01-data-sources.md` | Before writing code. Canonical field map for the enriched agent payload, including `computedCss.*`. |
+| 02 | `references/02-css-reset.md` | Before writing code. Required CSS reset template. |
+| 03 | `references/03-node-to-html.md` | While mapping each node. Deterministic node consumption algorithm. |
+| 04 | `references/04-text-rendering.md` | When handling TEXT nodes. |
+| 05 | `references/05-layout-modes.md` | When handling FRAME / SECTION / INSTANCE layout. |
+| 06 | `references/06-paint-effects.md` | When handling gradients, masks, shadows, blur, and appearance mapping. |
+| 07 | `references/07-tokens-and-vars.md` | When variables or token bindings are involved. |
+| 08 | `references/08-route-escalation.md` | When hard nodes appear or scorecard results require route upgrades. |
+| 09 | `references/09-verification.md` | For acceptance. This is the single source of truth for verification. |
+| 10 | `references/10-bridge-env.md` | When bridge, plugin, or cache environment issues appear. |
 
-- 输入必须先落成 `<figma-url>`、`<cache-dir>`、`<output-dir>`
-- 若用户没指定输出目录，按 `output/gen-<nodeId>/` 或当前任务约定输出
-- 若只是局部 node 还原，不要直接把别的历史项目产物拿来复用
+## Standard Workflow (No Skipping)
 
-### Workflow 1 — 先跑提取与机械基线
+When a user gives a Figma URL or node ID and asks for a React/web reproduction, follow this workflow in order. The purpose is to stop step-skipping from degrading fidelity.
+
+### Workflow 0 — Resolve Inputs
+
+- Resolve the task into `<figma-url>`, `<cache-dir>`, and `<output-dir>`.
+- If the user does not specify an output path, use `output/gen-<nodeId>/` or the agreed task path.
+- Never reuse another task’s generated artifacts for a different node.
+
+### Workflow 1 — Extract and Generate the Mechanical Baseline First
 
 ```bash
 node skills/figma/scripts/figma_pipeline.mjs --auto "<figma-url>"
 ```
 
-必须先拿到：
+Do not edit JSX/CSS before you have:
+
 - `bridge-agent-payload.json`
 - `render-ready.json`
 - `baseline/baseline.png`
-- 首轮 `_verify/verify-report.json` / `lint-report.json` / `scorecard*.json`
-- 机械输出项目（React/Vite 或 skeleton）
+- the first `_verify/verify-report.json`
+- the first `lint-report.json`
+- the first `scorecard*.json`
+- the mechanical output project
 
-**禁止跳过**：不能还没拿到 baseline 和首轮 verify，就直接手改 JSX/CSS。
+Skipping the first verification pass is forbidden.
 
-### Workflow 2 — 先读诊断，再选交付模式
+### Workflow 2 — Read Diagnostics Before Choosing a Delivery Mode
 
-先读：
+Read first:
+
 - `_verify/verify-report.json`
 - `_verify/scorecard-heatmap.png`
 - `lint-report.json`
-- 必要时回 `render-ready.json` / `bridge-agent-payload.json`
+- and, when needed, `render-ready.json` / `bridge-agent-payload.json`
 
-然后才允许决定：
-- 当前是 `DOM-first`、`Hybrid-SVG` 还是 `Visual-lock`
-- 当前差异属于 layout drift、text drift 还是 hard node drift
-- 是否需要 route escalation
+Only then decide:
 
-**禁止跳过**：不能先决定“这块用 overlay / SVG lock”，再去补看 heatmap 或 diff 证据。
+- whether the delivery mode should be `DOM-first`, `Hybrid-SVG`, or `Visual-lock`
+- whether the gap is layout drift, text drift, color drift, or hard-node drift
+- whether route escalation is required
 
-### Workflow 3 — 主会话定向 refactor
+Do not choose an overlay or lock strategy before reading the actual diff evidence.
 
-只在主会话里修当前输出项目：
-- 保留 `className (n-<id>)` 和 `id`
-- 优先做最小必要改动
-- 如果是 DOM 路线，修结构 / 字体 / gap / 对齐 / 语义
-- 如果是 hard-node 路线，按 route escalation 升级到 SVG / Canvas / Raster
+### Workflow 3 — Refactor in the Main Session Only
 
-**禁止跳过**：
-- 不要把“验证没做完”的猜测直接写成最终结构
-- 不要先大规模美化/抽象，再回头补 fidelity
+Change only the current generated output:
 
-### Workflow 4 — 每轮改动后立即复验
+- preserve `className (n-<id>)` and `id`
+- prefer the smallest effective change set
+- if staying on a DOM route, fix structure, typography, spacing, alignment, and semantics
+- if the node is hard-route driven, escalate with `SVG_ISLAND`, `CANVAS_ISLAND`, or `RASTER_LOCK`
 
-每次有意义的改动后都要重新跑：
+Do not:
+
+- turn an unverified guess into final structure
+- start with broad cleanup or beautification before fidelity is under control
+
+### Workflow 4 — Re-Verify After Every Meaningful Change
+
+After each meaningful round, rerun:
+
 - `lint_reproduction`
-- scorecard / verify_loop
+- scorecard / `verify_loop`
 
-判断：
-- 是否比上一轮更好
-- 是否需要继续保持当前交付模式
-- 是否需要升级 locked region / 降低锁定范围 / 拆出交互元素
+Use that evidence to decide:
 
-**禁止跳过**：不能连做多轮结构改动却只在最后验一次。
+- whether the result improved
+- whether the current delivery mode is still appropriate
+- whether the locked region should expand, shrink, or release interactive elements
 
-### Workflow 5 — 最多 3 轮闭环
+Do not stack multiple major structure changes and verify only once at the end.
 
-推荐节奏：
-1. 机械基线
-2. 第一轮定向修复
-3. 第二轮 route / text / layout 收敛
-4. 仍不过则人工判断是否进入 `Visual-lock` / `RASTER_LOCK`
+### Workflow 5 — Maximum Three Iterations
 
-超过 3 轮仍无明显收敛：
-- 停止继续“凭感觉微调”
-- 回到 route / screenshot / font loading / baseline 稳定性排查
+Recommended cadence:
 
-### Workflow 6 — 报告时必须显式交代
+1. Mechanical baseline
+2. First targeted fix
+3. Second route / text / layout convergence pass
+4. If still not converging, manually decide whether to enter `Visual-lock` or `RASTER_LOCK`
 
-- 最终交付模式
+If three rounds do not clearly converge:
+
+- stop “tuning by feel”
+- return to route, screenshot, font-loading, or baseline-stability diagnosis
+
+### Workflow 6 — Report Explicitly
+
+Every final report must include:
+
+- final delivery mode
 - locked regions
-- SSIM / pixel diff / ΔE00 变化
-- lint block / warn 数
-- 还剩哪些偏差
+- SSIM / pixel diff / DeltaE00 changes
+- lint block / warn counts
+- remaining gaps or declared deviations
 
-## 跳步风险
+## Step-Skipping Risks
 
-以下跳步会明显削弱还原性：
+These shortcuts directly reduce reproduction quality:
 
-- 跳过首轮 verify：会在没有证据的情况下误判成布局问题
-- 跳过交付模式判断：会把本应 route escalation 的问题硬塞回 DOM 修
-- 跳过每轮复验：会把多个变化叠在一起，失去归因
-- 跳过 locked region 报告：会把 `Visual-lock` 误说成 DOM fidelity
-- 跳过 lint：会遗漏结构丢节点、gap 错配、资源路径问题
+- skipping the first verify pass
+- skipping delivery-mode selection
+- skipping per-round re-verification
+- skipping locked-region reporting
+- skipping lint reproduction
 
-**原则**：先基线，后诊断；先证据，后路由；先小改，后复验；最后才宣称“已对齐”。  
+The rule is:
 
-## 强制流程（5 步，每步完成才能进下一步）
+```text
+baseline first -> diagnostics second -> routing decision third -> minimal fix -> re-verify -> claim alignment last
+```
 
-### Step 1 — Bridge 提取
+## Delivery Modes
+
+Three delivery modes are supported for web reproduction:
+
+| Mode | Best for | Primary goal |
+|---|---|---|
+| `DOM-first` | Product pages, design-system pages, interaction-heavy surfaces | Preserve true DOM structure and maintainability |
+| `Hybrid-SVG` | Pages with local hard nodes but still meaningful live DOM, text, and buttons | Keep interactive DOM while locking difficult regions to SVG/Canvas |
+| `Visual-lock` | Marketing pages, campaign pages, heavily decorative surfaces, or designs that remain hard-node limited after DOM/Hybrid passes | Maximize visual parity, accept stronger graphic locking |
+
+Rules:
+
+- Start with `DOM-first` by default.
+- Escalate to `Hybrid-SVG` when a subtree is hard-node dominated or scorecard results repeatedly indicate hard-node drift.
+- Escalate to `Visual-lock` only when most remaining error comes from hard/decorative surfaces and the page has weak interaction requirements.
+- If you use `Hybrid-SVG` or `Visual-lock`, the final report must explicitly state the delivery mode and the locked regions.
+
+### Locked Regions
+
+A locked region is a node, subtree, or page surface whose final pixels come from SVG, Canvas, or Raster instead of pure DOM/CSS reconstruction.
+
+Locked regions may still keep:
+
+- original `id`
+- original `className`
+- semantic wrappers
+- minimal interactive escape hatches
+
+for traceability, audits, and later refactors.
+
+## Overlay / Island Constraints
+
+When using `SVG_ISLAND`, `CANVAS_ISLAND`, or `RASTER_LOCK` overlays:
+
+- Prefer subtree-level locking before page-level locking.
+- Only use page-level locking when most remaining drift comes from page-wide decorative surfaces and interaction is weak.
+- Preserve original `id` and `className`.
+- Overlay layers must default to `aria-hidden="true"`.
+- Elements that need real click, hover, or focus must remain above the overlay, or be removed from the locked region.
+- If the whole page is overlay-locked, the report must say this is `Visual-lock`, not pure DOM fidelity.
+- `SVG_ISLAND` internals are not judged by ordinary flex-box decomposition; they are judged by route correctness plus visual verification.
+
+## Mandatory Five-Step Process
+
+### Step 1 — Bridge Extraction
 
 ```bash
 node ./scripts/figma_pipeline.mjs "<figma-url>"
 ```
 
-产出 `cache/<fileKey>/<nodeId>/` 下：
-- `bridge-agent-payload.json` —— 完整富集 payload（9MB 级），字段级权威源
-- `outline.json` —— **稀疏树 sidecar（~50–400KB，对标 MCP `get_metadata`）。跨树推理 / 定位节点时先读它，不要上来就读 9MB payload**
-- `baseline/baseline.png` —— A8 plugin 导出的 2x PNG
-- `cross-validation-report.json` —— 交叉校验警告
+Artifacts in `cache/<fileKey>/<nodeId>/`:
 
-处理规则：
-- `NO_PLUGIN_CONNECTION` → **停止**，读 `10-bridge-env.md` 排查，**禁止**静默降级到 MCP-only
-- **HIGH 级**交叉校验警告必须在 Step 3 前处理（退回 `01-data-sources.md` 核对对应字段）
-- 跨树推理（筛选节点 / 定位子树 / 统计类型分布）优先用 `outline.json`；字段级下钻才回 `bridge-agent-payload.json`
-- 图标/插图密集的设计，可选加 `--collapse-vector-groups` flag 让纯 vector 子树合成一个 SVG（在测试 cache 上 SSIM 反而从 0.838 ↑ 0.862）：
-  ```bash
-  node ./scripts/render_ready.mjs <cache-dir> --collapse-vector-groups
-  ```
-  折叠会写 `collapsed-vector-groups.json` 审计文件，可逆。首次开启必须验收 SSIM 不下降
+- `bridge-agent-payload.json` — enriched payload, canonical field source
+- `outline.json` — sparse planning tree, MCP-like metadata view
+- `baseline/baseline.png` — plugin-exported 2x PNG
+- `cross-validation-report.json` — bridge-vs-css validation report
 
-### Step 2 — 节点审计
+Rules:
 
-遍历 `designSnapshot.root` 所有节点，输出审计表：
+- `NO_PLUGIN_CONNECTION` means stop and read `10-bridge-env.md`. Do not silently fall back to MCP-only.
+- Any `HIGH` cross-validation warning must be resolved before Step 3.
+- Use `outline.json` for cheap tree reasoning; use `bridge-agent-payload.json` only for field-level drill-down.
+- For vector-dense designs, `render_ready.mjs --collapse-vector-groups` may be used, but only after confirming it does not reduce fidelity.
 
-```
-节点ID  名称         visible  opacity  渲染决定
-xxxx    播放按钮      true     0        不渲染 [OPACITY=0]
-xxxx    分类标签      false    1        不渲染 [HIDDEN]
-xxxx    标题         true     1        渲染
+### Step 2 — Node Audit
+
+Produce a render audit table from `designSnapshot.root`, for example:
+
+```text
+Node ID   Name          visible  opacity  Render decision
+xxxx      Play button   true     0        Skip [OPACITY=0]
+xxxx      Category tag  false    1        Skip [HIDDEN]
+xxxx      Title         true     1        Render
 ```
 
-依据：`node.visible === false` → 不渲染；`node.style.opacity === 0` → 不渲染；`fills[].visible === false` → 该 fill 层不渲染。
+Rules:
 
-### Step 3 — 写代码
+- `node.visible === false` -> do not render
+- `node.style.opacity === 0` -> do not render
+- `fills[].visible === false` -> skip that fill layer only
 
-#### Step 3a — 直接生成（首选，零翻译）
+### Step 3 — Write Code
 
-两条路，按消费方需求选：
+#### Step 3a — Direct Generation (Preferred)
 
-**A. 完整 Vite 项目**（推荐，要跑 verify_loop 的必走）
+Two options:
+
+**A. Full Vite project**
 
 ```bash
 node ./scripts/codegen_pipeline.mjs <cache-dir> <output-dir>
 ```
 
-一次产出可 `npm install && npm run dev` 的 React + Vite 工程：`src/App.jsx` / `src/App.css` / `index.html` / `vite.config.js` / `package.json`。`index.html` 里**已自动注入** Google Fonts `<link>`（按 bridge 实际用到的 family + weight + italic 精确请求，无白名单）。SVG blobs 进 `public/svg/`，图片进 `src/assets/`。
+This outputs a runnable React + Vite project:
 
-**B. 单文件 React 组件**（嵌进既有项目时）
+- `src/App.jsx`
+- `src/App.css`
+- `index.html`
+- `vite.config.js`
+- `package.json`
+
+The generated `index.html` already injects exact Google Fonts requests derived from bridge font data. SVG blobs go to `public/svg`. Image assets go to `src/assets`.
+
+**B. Single-file React component**
 
 ```bash
 node ./scripts/generate_skeleton.mjs <cache-dir> --target react --out output/skeleton.jsx
 ```
 
-产出 `output/skeleton.jsx`：单文件 React 组件，导出 `RESET_CSS` 和 `FONTS_HREF` 常量供消费方接入全局样式和 `<head>`。
+This outputs a single React component plus:
 
-agent 只需要做：
-1. **重命名组件**（默认按 root.name 自动转 PascalCase；按需改）
-2. **加语义标签**（`<div data-fig-name="Nav">` → `<nav>`，data-fig-id 已留作反查标记）
-3. **接交互**（onClick / hover / 状态）
-4. （路 B 才需要）把 `RESET_CSS` + `FONTS_HREF` 接入消费方的全局样式 / `<head>`
-5. （路 B 才需要）把 `cache/<key>/assets/` 复制或符号链接到消费方的 public 目录
+- `RESET_CSS`
+- `FONTS_HREF`
 
-补充约束：
-- 语义化和组件拆分要对**当前页面**成立，不能为了复用历史案例而强行抽成固定模板
-- 如果当前设计稿更适合保留机械结构（例如复杂硬节点、密集 vector、一次性营销页装饰层），优先保真，再做最小语义增强
-- 如果当前设计稿出现可复用模块（Card / Hero / Pricing / Footer 等），再抽象子组件；抽象来自当前树结构，不来自旧案例记忆
+for consumers who want to embed the result into an existing project.
 
-**禁止**：再去逐节点翻译 bridge 字段、手算 CSS、改 generator 已经给的 inline style。generator 已经吃掉这些工作。
+The agent’s job after generation is limited to:
 
-#### Step 3a.1 — 选择交付模式
+1. Renaming the component if needed
+2. Swapping in semantic tags where appropriate
+3. Adding interactivity or state
+4. Wiring `RESET_CSS` / `FONTS_HREF` in skeleton mode
+5. Copying or symlinking assets in skeleton mode
 
-通用 Web 还原默认有三种交付模式，按**当前设计稿的交互强度与 route 信号**选择：
+Do not re-translate bridge fields or recompute CSS that the generator already emitted.
 
-| 模式 | 适用场景 | 优先目标 |
-|------|----------|----------|
-| `DOM-first` | 普通业务页 / 设计系统页 / 交互较多、状态较多的界面 | 保留真实 DOM 结构与可维护性 |
-| `Hybrid-SVG` | 局部 hard node 很重，但页面仍有真实文本、按钮、状态和语义结构 | 保留可交互 DOM，同时把高误差区域锁给 SVG/Canvas |
-| `Visual-lock` | 营销页、活动页、强装饰页面，或 DOM/Hybrid 连续验证仍卡在 hard-node 阈值下 | 优先视觉一致性，接受更强的图形锁定 |
+#### Step 3b — Manual Fallback
 
-选择规则：
-- 默认从 `DOM-first` 开始
-- 某些子树命中 hard signal 或 scorecard 持续指向 hard node drift → 升到 `Hybrid-SVG`
-- 大部分关键误差都来自 hard node，且当前页面交互很弱/很少 → 可升到 `Visual-lock`
-- 一旦使用 `Hybrid-SVG` 或 `Visual-lock`，必须在验收报告里显式声明**交付模式**和**锁定区域**
+For non-web targets such as iOS, Flutter, or mini-programs, follow `references/03-node-to-html.md`.
 
-锁定区域（locked region）定义：
-- 某个节点 / 子树 / 页面区域的最终像素由 SVG / Canvas / Raster 提供，而不是由底下的 DOM 逐属性还原
-- 锁定区域允许保留底层 `id` / `className` / 语义壳层，供定位、审计、最小交互和后续 refactor 使用
+Preconditions:
 
-### Step 3a.2 — overlay / island 约束
+1. Read `02-css-reset.md` if the target is web
+2. Read `03-node-to-html.md`
+3. Read references 04–08 as needed
 
-如果当前方案使用 `SVG_ISLAND` / `CANVAS_ISLAND` / `RASTER_LOCK` 覆层：
+Field precedence:
 
-- 优先锁**子树级**区域；只有当误差主要来自整页装饰层、且交互很弱时，才考虑**页面级**锁定
-- 保留原始 `id` 与 `className`，不要为了锁图删掉可审计结构
-- overlay 图层默认 `aria-hidden="true"`；它是视觉载体，不应抢语义
-- 需要真实点击/hover/focus 的元素，必须保持在 overlay 之上，或从锁定区域里拆出去
-- 如果 overlay 覆盖了整个页面，必须在报告中说明这是 `Visual-lock`，不能再把它表述成纯 DOM fidelity
-- `SVG_ISLAND` 的内部几何不再按普通 flex 盒模型逐项解释；这类区域以视觉验收和 route 正确性为准
+1. `node.computedCss.full` / `node.computedHtml`
+2. `node.computedCss.<field>`
+3. raw `node.style.*` / `node.layout.*` / `node.text.*`
+4. `node.css.*` only when the authoritative fields are absent and the case is not a known downgrade
 
-#### Step 3b — 手工 fallback（仅在 generator 不能用时）
+No guessing from screenshots. No component-name assumptions. No manual recomputation of gradients, token mappings, or layout that the pipeline already resolved.
 
-如果消费方是非 Web 环境（iOS / SwiftUI / 小程序 / Flutter / 原生），按 `references/03-node-to-html.md` 的七步算法手工还原。
+## Acceptance
 
-**前置**（仅 fallback）：
-1. Read `02-css-reset.md` 把 reset 块复制到样式表顶部（Web 场景）
-2. Read `03-node-to-html.md` 掌握七步算法
-3. 根据节点类型按需 Read 04-08
+Read `09-verification.md` in full. Summary:
 
-**消费时优先级（硬规定，3a 和 3b 通用）**：
+- region-first verification
+- large-image guards
+- `--headless=new --window-size=W,H --force-device-scale-factor=2`
+- diagnose screenshot issues before blaming CSS
+- preview sidecars for very large images
+- page / region / hard-node thresholds
 
-1. `node.computedCss.full` / `node.computedHtml` 存在 → **直接贴，不再推理**
-2. `node.computedCss.<field>` 存在 → 直接映射到对应 CSS 属性
-3. `node.style.*` / `node.layout.*` / `node.text.*` 原始字段（按 `01-data-sources.md` 映射）
-4. `node.css.*` 仅在原始字段缺失且非「已知降级项」时参考
+Without a baseline, you cannot claim alignment.
 
-**禁止**：猜测、从截图推断、凭组件名假设、手算可由 pipeline 产出的 CSS（gradient / token / positioning）。
+Without scorecard or explicit visual evidence, you cannot claim acceptance.
 
-### Step 4 — 验收
+## Hard Gates
 
-**完整流程见 `09-verification.md`**。摘要：
+Any unchecked item means the reproduction is incomplete:
 
-- **region-first**：先对修改区做 `--crop + --mode region`，过了再做 page
-- **大图保护**：baseline/candidate > 25M 像素禁止全图，必须 crop
-- **截图规则**：candidate 必须 `--headless=new --window-size=W,H --force-device-scale-factor=2`，**禁止** `sips --cropOffset` 后处理（详见 09 「截图后处理」节）
-- **诊断顺序**：SSIM 异常低（<0.7）时**先**验证截图本身（尺寸、顶部黑/白带、逐行 brightness profile），**再**怀疑 CSS / 字体 / 布局
-- **大图 Read 限制**：baseline / candidate 最长边超 2000 px 时不能直接 Read 给 LLM —— pipeline 已自动产出 `<name>-preview.png` + `<name>-preview.meta.json` 同目录，读 preview，量像素时按 meta 里的 `scale` 还原
-- **scorecard 命令**见 `09-verification.md`
-- 阈值：page（0.98 / 0.5% / ΔE p95 1.5）、region（0.985 / 0.2% / 1.0）、hard-node（0.99 / 0.1% / 0.8）
+- [ ] Bridge extraction succeeded without silent fallback
+- [ ] Node audit table exists and hidden / opacity-zero nodes were not rendered
+- [ ] All `HIGH` cross-validation warnings were handled
+- [ ] Web generation started from `generate_skeleton.mjs` or `codegen_pipeline.mjs`
+- [ ] The reset block from `02-css-reset.md` is present
+- [ ] All available `computedCss.full` / `computedHtml` values were used directly
+- [ ] `layoutMode: NONE` frames use absolute positioning and visual-order sorting
+- [ ] Multi-segment text is split into spans
+- [ ] Gradient fills use `computedCss.background`
+- [ ] Token bindings emit `var(--xxx)` where applicable
+- [ ] Hard nodes were escalated to SVG / Canvas / Raster when required
+- [ ] If `Hybrid-SVG` or `Visual-lock` was used, the delivery mode and locked regions are declared
+- [ ] Overlay-based regions do not silently kill required interactivity
+- [ ] Scorecard has been run according to `09-verification.md`
+- [ ] The final report lists passes, failures, unverified areas, and known deviations
+- [ ] Full-page scorecard was not run on oversized images
+- [ ] `bridge-response.json` / full `restSnapshot` were not blindly loaded into context
 
-无 baseline 不能宣称「已对齐」。scorecard 未跑 + 无视觉对照不能宣称「已验收」。
+## Environment
 
-### Step 5 — Hard Gates 自查
-
-提交代码前逐条过，有未通过回对应 Step。
-
-## Hard Gates（违反任一条 = 还原未完成）
-
-- [ ] Bridge 提取成功，未静默降级
-- [ ] 节点审计表已生成，HIDDEN / OPACITY=0 节点未渲染
-- [ ] cross-validation-report 的 HIGH 警告已处理
-- [ ] **Web 场景已经跑 `generate_skeleton.mjs` 拿到骨架**（Step 3a），仅做命名/语义/交互定制
-- [ ] 代码最顶部有 `02-css-reset.md` 的 reset 块（Step 3a 生成器已自动注入）
-- [ ] 所有 `computedCss.full` / `computedHtml` 存在的节点直接贴，没回头手算
-- [ ] 所有 `layoutMode: NONE` 的 FRAME 用了 absolute 定位，子节点按 `absoluteBoundingBox.x/y` 排序
-- [ ] 所有 TEXT 的 segments ≥2 段拆了 span
-- [ ] 所有 GRADIENT fill 用 `computedCss.background`
-- [ ] 所有 token 绑定输出 `var(--xxx)` 而非硬编码
-- [ ] hard node 已升级到 SVG / Canvas / Raster 之一（见 `08-route-escalation.md`）
-- [ ] 若使用 `Hybrid-SVG` / `Visual-lock`，已声明交付模式与锁定区域
-- [ ] overlay 方案下需要交互的节点未被视觉锁定遮死，或已明确列为非交互表面
-- [ ] 已按 `09-verification.md` 跑 scorecard，region 收敛后再做 page 级
-- [ ] 验收报告列明：通过项 / 失败项 / 未验收项 / 已知偏差
-- [ ] 大图（>25M 像素）未直接跑全图 scorecard
-- [ ] 未把 `bridge-response.json` / 完整 `restSnapshot` 整包加载到上下文
-
-## 环境
-
-依赖安装、bridge 端口、插件导入、cache 产物路径全部见 `references/10-bridge-env.md`。
+See `references/10-bridge-env.md` for dependency installation, bridge ports, plugin import instructions, and cache layout.

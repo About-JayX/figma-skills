@@ -6,7 +6,7 @@ import { rejectJobsForClient } from '../job_store.mjs';
 const HEARTBEAT_INTERVAL_MS = 15000;
 
 function createDisconnectError() {
-  return Object.assign(new Error('插件 SSE 连接已断开'), {
+  return Object.assign(new Error('The plugin SSE connection was closed'), {
     code: 'PLUGIN_DISCONNECTED',
   });
 }
