@@ -17,7 +17,11 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { collectFontFamilyWeights, buildGoogleFontsHref } from './lib/render_node.mjs';
+import {
+  collectFontFamilyWeights,
+  buildGoogleFontsHref,
+  partitionFontsByHost,
+} from './lib/render_node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -140,30 +144,40 @@ function copyAssets(cache, outSrc, outRoot) {
 // <link> is parallel-fetched by the browser, while @import waits for the
 // stylesheet to parse — under verify_loop's --virtual-time-budget the
 // difference can be the screenshot capturing before fonts swap in.
-function buildGoogleFontsLinkFromCache(cacheDir) {
+function buildFontsLinkFromCache(cacheDir) {
   const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
-  if (!fs.existsSync(payloadPath)) return '';
+  if (!fs.existsSync(payloadPath)) return { block: '', googleCount: 0, externalCount: 0 };
   let root;
   try {
     const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
     root = payload?.designSnapshot?.root || payload?.root || payload;
   } catch {
-    return '';
+    return { block: '', googleCount: 0, externalCount: 0 };
   }
   const familyWeights = collectFontFamilyWeights(root);
-  const href = buildGoogleFontsHref(familyWeights);
-  if (!href) return '';
-  return [
-    '    <link rel="preconnect" href="https://fonts.googleapis.com" />',
-    '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />',
-    `    <link rel="stylesheet" href="${href}" />`,
-  ].join('\n');
+  const { google, externalHrefs } = partitionFontsByHost(familyWeights);
+
+  const lines = [];
+  const googleHref = buildGoogleFontsHref(google);
+  if (googleHref) {
+    lines.push('    <link rel="preconnect" href="https://fonts.googleapis.com" />');
+    lines.push('    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />');
+    lines.push(`    <link rel="stylesheet" href="${googleHref}" />`);
+  }
+  for (const href of externalHrefs) {
+    lines.push(`    <link rel="stylesheet" href="${href}" />`);
+  }
+  return {
+    block: lines.join('\n'),
+    googleCount: google.size,
+    externalCount: externalHrefs.size,
+  };
 }
 
 function scaffoldVite(out, projectName, cacheDir) {
   console.log('[4/4] scaffold Vite shell…');
   const name = projectName || `gen-${path.basename(out)}`;
-  const fontsLink = buildGoogleFontsLinkFromCache(cacheDir);
+  const { block: fontsLink, googleCount, externalCount } = buildFontsLinkFromCache(cacheDir);
   fs.writeFileSync(
     path.join(out, 'package.json'),
     JSON.stringify(
@@ -211,8 +225,7 @@ ${fontsLink ? fontsLink + '\n' : ''}    <title>${name}</title>
 `
   );
   if (fontsLink) {
-    const familyCount = (fontsLink.match(/family=/g) || []).length;
-    console.log(`[4/4] injected Google Fonts (${familyCount} family)`);
+    console.log(`[4/4] injected fonts: ${googleCount} Google Fonts, ${externalCount} external CDN`);
   }
   fs.writeFileSync(
     path.join(out, 'src', 'main.jsx'),

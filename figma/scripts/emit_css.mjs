@@ -83,13 +83,36 @@ function formatRadii(r) {
 function fontFamilyStack(fontFamily) {
   const family = String(fontFamily || '').trim();
   if (!family) return null;
-  if (family === 'MiSans VF') {
-    return `'MiSans VF', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif`;
+  if (family === 'MiSans VF' || family === 'MiSans') {
+    // 'MiSans' is the family the misans-vf CDN stylesheet registers. Keep the
+    // designer-declared 'MiSans VF' first so when a local copy is installed it
+    // still wins; the CDN form is a second-chance match.
+    return `'MiSans VF', 'MiSans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif`;
   }
   if (family === 'SF Pro') {
     return `'SF Pro', 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', sans-serif`;
   }
   return `'${family}', sans-serif`;
+}
+
+// CJK blocks covering Chinese (Unified + Ext-A), halfwidth/fullwidth forms,
+// Japanese hiragana/katakana, and Korean hangul syllables.
+const CJK_RE = /[\u3400-\u9fff\uff00-\uffef\u3040-\u30ff\uac00-\ud7af]/;
+function hasCJK(s) {
+  return CJK_RE.test(String(s || ''));
+}
+
+// Quantize Figma's variable-font weights (e.g. 380, 450, 330) to the nearest
+// 100-step. Fallback fonts (PingFang SC, system-ui) only ship static cuts, so a
+// raw `font-weight: 450` collapses to 400 and makes headings look unbold.
+// Rounds to nearest 100 and clamps to [100, 900]. String keywords like "bold"
+// pass through unchanged so browsers apply their built-in mapping.
+function quantizeFontWeight(w) {
+  if (w == null) return null;
+  const n = typeof w === 'number' ? w : parseInt(w, 10);
+  if (!Number.isFinite(n)) return w;
+  const step = Math.round(n / 100) * 100;
+  return Math.max(100, Math.min(900, step));
 }
 
 function inferCrossAxisAlign(node, parentNode) {
@@ -297,7 +320,10 @@ function emitRule(node, parentNode, indexById) {
   if (node.role === 'text' && node.text) {
     if (node.text.fontFamily) decls.push(['font-family', fontFamilyStack(node.text.fontFamily)]);
     if (node.text.fontSize) decls.push(['font-size', px(node.text.fontSize)]);
-    if (node.text.fontWeight) decls.push(['font-weight', node.text.fontWeight]);
+    if (node.text.fontWeight) {
+      const qw = quantizeFontWeight(node.text.fontWeight);
+      if (qw != null) decls.push(['font-weight', qw]);
+    }
     if (node.text.lineHeight) decls.push(['line-height', node.text.lineHeight]);
     if (node.text.letterSpacing) decls.push(['letter-spacing', node.text.letterSpacing]);
     // Skip emitting #000 color so text inherits from body (which can be #fff on dark designs).
@@ -309,6 +335,15 @@ function emitRule(node, parentNode, indexById) {
     if (node.text.textAlign) decls.push(['text-align', node.text.textAlign]);
     if (node.text.textTransform) decls.push(['text-transform', node.text.textTransform]);
     if (node.text.textDecoration) decls.push(['text-decoration', node.text.textDecoration]);
+    // CJK line-breaking: by default browsers break between any two CJK chars,
+    // which splits words like "手机号" down the middle when the container is
+    // narrow. keep-all forbids breaking inside CJK; break-word keeps long
+    // Latin strings from overflowing.
+    const cjkText = hasCJK(node.text.content || '') || (node.text.runs || []).some((r) => hasCJK(r.content));
+    if (cjkText) {
+      decls.push(['word-break', 'keep-all']);
+      decls.push(['overflow-wrap', 'break-word']);
+    }
     // Single-line heuristic: Figma stores width exactly fitting one line; browser font
     // metrics diverge slightly, so text can wrap unexpectedly (e.g. "How-to" at the hyphen).
     // fontSize may be null for text inside COMPONENT INSTANCES (bridge doesn't expose segments

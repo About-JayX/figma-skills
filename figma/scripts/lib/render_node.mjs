@@ -198,6 +198,47 @@ export function collectFontFamilyWeightsFromRenderReady(nodes) {
   return map;
 }
 
+// Families that Google Fonts does not host but that we know a public CDN for.
+// Each entry declares the stylesheet URL and the font-family string that URL
+// actually registers (may differ from the family Figma exported — e.g. Figma
+// uses "MiSans VF" for the variable font, but jsdelivr's package registers
+// "MiSans"). Both names stay in the CSS font stack (see emit_css.fontFamilyStack)
+// so local installs and the CDN copy can both match.
+//
+// Verified URLs — confirm any additions by fetching and inspecting the
+// @font-face block before shipping.
+export const EXTERNAL_FONT_STYLESHEETS = {
+  'MiSans VF': {
+    href: 'https://cdn.jsdelivr.net/npm/misans-vf@1.0.0/lib/MiSans.min.css',
+    actualFamily: 'MiSans',
+  },
+  'MiSans': {
+    href: 'https://cdn.jsdelivr.net/npm/misans-vf@1.0.0/lib/MiSans.min.css',
+    actualFamily: 'MiSans',
+  },
+};
+
+// Partition a familyWeights map into (a) families Google Fonts can serve and
+// (b) families that need an external stylesheet (lookup in
+// EXTERNAL_FONT_STYLESHEETS). Families that match neither are kept on the
+// Google side — the existing href builder will just encode a name Google might
+// or might not serve; we emit the link regardless so the designer sees the
+// fallback chain in devtools when the request 404s.
+export function partitionFontsByHost(familyWeights) {
+  const google = new Map();
+  const externalHrefs = new Set();
+  if (!familyWeights) return { google, externalHrefs };
+  for (const [family, entry] of familyWeights.entries()) {
+    const ext = EXTERNAL_FONT_STYLESHEETS[family];
+    if (ext) {
+      externalHrefs.add(ext.href);
+    } else {
+      google.set(family, entry);
+    }
+  }
+  return { google, externalHrefs };
+}
+
 // Build a single Google Fonts CSS2 URL from collectFontFamilyWeights output.
 // Returns '' when the map is empty so callers can branch cleanly.
 // Format: family=<Name>:ital,wght@0,<w1>;0,<w2>;1,<w1>;1,<w2>&family=...&display=swap

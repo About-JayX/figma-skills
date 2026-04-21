@@ -430,6 +430,45 @@ function checkL8ImageReferences(cssSrc, elements, assetsDir, cssPath, jsxPath) {
   return violations;
 }
 
+// L9: Latin-only fonts assigned to CJK content
+// Figma design data can carry stale / mis-set font assignments — e.g. a label
+// that visually renders in MiSans but has fontName.family="Prompt" on the
+// segment. Bridge is faithful, so the bug reaches CSS; at runtime the browser
+// can't render CJK in Prompt and falls back to system font with wrong metrics,
+// which throws off absolutely-positioned neighbors. Flag these early so the
+// designer can correct the source or the agent can substitute before emit.
+const CJK_RE = /[\u3400-\u9fff\uff00-\uffef\u3040-\u30ff\uac00-\ud7af]/;
+const LATIN_ONLY_FONTS = new Set([
+  'prompt', 'inter', 'roboto', 'poppins', 'dm sans', 'dm mono', 'montserrat',
+  'rubik', 'work sans', 'lato', 'open sans', 'nunito', 'karla', 'oswald',
+  'raleway', 'playfair display', 'merriweather',
+]);
+
+function checkL9CjkFont(nodes) {
+  const violations = [];
+  for (const { node: n } of nodes) {
+    if (n.type !== 'TEXT') continue;
+    const segs = n.style?.textSegments || n.text?.segments || [];
+    for (const s of segs) {
+      const chars = s?.characters || '';
+      if (!CJK_RE.test(chars)) continue;
+      const family = s?.fontName?.family;
+      if (!family) continue;
+      if (LATIN_ONLY_FONTS.has(family.toLowerCase())) {
+        violations.push({
+          id: 'L9',
+          severity: 'warn',
+          nodeId: n.id,
+          nodeName: n.name,
+          detail: `CJK content "${chars.slice(0, 30)}" assigned Latin-only font "${family}" — design data likely stale; browser will fall back to system font with wrong metrics and break absolute positioning.`,
+          hint: 'Fix the font on this node in Figma, or override fontFamily in render_ready post-processing.',
+        });
+      }
+    }
+  }
+  return violations;
+}
+
 // L6: All JSX visible text must come from bridge textSegments or TEXT-node names
 function checkL6TextContent(nodes, jsxTexts) {
   const bank = new Set();
@@ -551,6 +590,7 @@ function main() {
     ...checkL6TextContent(nodes, textNodes),
     ...checkL7FontFamily(nodes, rules),
     ...checkL8ImageReferences(cssSrc, elements, null, args.css, args.jsx),
+    ...checkL9CjkFont(nodes),
   ];
 
   const summary = {

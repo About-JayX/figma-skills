@@ -278,9 +278,76 @@ if (emitCssFontRes.status !== 0) {
 }
 const cssFont = fs.readFileSync(cssFontOut, 'utf8');
 assert(
-  cssFont.includes("font-family: 'MiSans VF', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;"),
-  'M6: MiSans VF gets CJK-friendly fallback stack'
+  cssFont.includes("font-family: 'MiSans VF', 'MiSans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;"),
+  'M6: MiSans VF stack includes both the Figma name and the CDN-registered name'
 );
+
+// M7: font-weight quantized to nearest 100 (450 → 500). Fallback fonts (PingFang
+// SC etc.) only ship static cuts; a raw 450 collapses to 400 in browsers and
+// makes headings look unbold.
+assert(
+  /\.n-1-2\s*\{[^}]*font-weight:\s*500;/.test(cssFont),
+  'M7: font-weight 450 quantized to 500'
+);
+
+// M8: CJK content gets word-break:keep-all + overflow-wrap:break-word so
+// "使用您的 手机号/邮箱注册" doesn't split "手机号" down the middle when the
+// container is narrow.
+assert(
+  /\.n-1-2\s*\{[^}]*word-break:\s*keep-all;/.test(cssFont),
+  'M8: CJK text gets word-break: keep-all'
+);
+assert(
+  /\.n-1-2\s*\{[^}]*overflow-wrap:\s*break-word;/.test(cssFont),
+  'M8: CJK text gets overflow-wrap: break-word'
+);
+
+// M9: weight quantization boundary checks (regression guard for the rounding
+// table). 380→400, 330→300, 750→800, "bold" keyword passes through.
+const rrWeightPath = path.join(tmp, 'rr-weight.json');
+fs.writeFileSync(
+  rrWeightPath,
+  JSON.stringify({
+    schemaVersion: 1,
+    rootId: '1:1',
+    rootClass: 'n-1-1',
+    palette: [],
+    assetsManifest: [],
+    svgManifest: [],
+    nodes: [
+      { id: '1:1', className: 'n-1-1', parentId: null, type: 'FRAME', role: 'container', rendered: true,
+        childrenOrder: ['1:a','1:b','1:c','1:d','1:e'], box: { width: 400, height: 400, absX: 0, absY: 0 },
+        flex: null, positioning: 'AUTO', clipsContent: false, style: {}, text: null, image: null, vector: null },
+      ...[
+        { id: '1:a', weight: '380', expect: '400' },
+        { id: '1:b', weight: '330', expect: '300' },
+        { id: '1:c', weight: '450', expect: '500' },
+        { id: '1:d', weight: '750', expect: '800' },
+        { id: '1:e', weight: 'bold', expect: 'bold' },
+      ].map(({ id, weight }) => ({
+        id, className: `n-${id.replace(':','-')}`, parentId: '1:1', type: 'TEXT', role: 'text',
+        rendered: true, childrenOrder: [], box: { width: 100, height: 20, absX: 0, absY: 0 }, flex: null,
+        positioning: 'AUTO', clipsContent: false, style: {}, image: null, vector: null,
+        text: { content: 'sample', fontFamily: 'Inter', fontSize: 14, fontWeight: weight,
+                lineHeight: null, letterSpacing: null, color: '#000000', textAlign: 'left',
+                textTransform: null, textDecoration: null, runs: null },
+      })),
+    ], skipped: [], stats: {},
+  }, null, 2)
+);
+const cssWeightOut = path.join(tmp, 'App-weight.css');
+spawnSync(process.execPath, [path.join(__dirname, 'emit_css.mjs'), rrWeightPath, cssWeightOut], { encoding: 'utf8' });
+const cssWeight = fs.readFileSync(cssWeightOut, 'utf8');
+for (const { id, expect } of [
+  { id: '1-a', expect: '400' },
+  { id: '1-b', expect: '300' },
+  { id: '1-c', expect: '500' },
+  { id: '1-d', expect: '800' },
+  { id: '1-e', expect: 'bold' },
+]) {
+  const re = new RegExp(`\\.n-${id}\\s*\\{[^}]*font-weight:\\s*${expect};`);
+  assert(re.test(cssWeight), `M9: weight for .n-${id} quantized to ${expect}`);
+}
 
 console.log(`\n── Total: ${passed} passed, ${failed} failed ──`);
 fs.rmSync(tmp, { recursive: true, force: true });
