@@ -15,6 +15,25 @@ function escJsx(s) {
   return String(s ?? '').replace(/[{<>]/g, (ch) => ({ '{': '&#123;', '<': '&lt;', '>': '&gt;' }[ch]));
 }
 
+function camelCaseCssProp(prop) {
+  return String(prop ?? '').replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+function renderInlineStyle(style) {
+  const entries = Object.entries(style || {}).filter(([, value]) => value != null && value !== '');
+  if (entries.length === 0) return '';
+  const body = entries
+    .map(([prop, value]) => `${camelCaseCssProp(prop)}: ${JSON.stringify(String(value))}`)
+    .join(', ');
+  return ` style={{ ${body} }}`;
+}
+
+function renderTextRuns(runs) {
+  return runs
+    .map((run) => `<span${renderInlineStyle(run.style)}>${escJsx(run.content)}</span>`)
+    .join('');
+}
+
 function renderNode(node, indexById, imageImports, depth = 0) {
   const pad = '  '.repeat(depth + 2);
   const id = node.id.replace(/[:;]/g, '-');
@@ -23,6 +42,10 @@ function renderNode(node, indexById, imageImports, depth = 0) {
   // TEXT leaf
   if (node.role === 'text') {
     const content = node.text?.content || node.name || '';
+    const runs = Array.isArray(node.text?.runs) ? node.text.runs : null;
+    if (runs?.length) {
+      return `${pad}<span className="${cls}" id="${id}">${renderTextRuns(runs)}</span>`;
+    }
     return `${pad}<span className="${cls}" id="${id}">${escJsx(content)}</span>`;
   }
 

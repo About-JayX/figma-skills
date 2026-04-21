@@ -50,7 +50,7 @@ function buildReset(theme) {
   return `/* reset */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: ${theme.bg}; color: ${theme.color}; font-family: system-ui, sans-serif; }
-body { display: flex; justify-content: center; }
+body { overflow-x: auto; }
 img { display: block; }
 
 `;
@@ -74,9 +74,75 @@ function px(v) {
 
 function formatRadii(r) {
   if (!r) return null;
+  if (typeof r === 'string') return r;
   if (typeof r === 'number') return px(r);
   if (Array.isArray(r) && r.length === 4) return r.map(px).join(' ');
   return null;
+}
+
+function fontFamilyStack(fontFamily) {
+  const family = String(fontFamily || '').trim();
+  if (!family) return null;
+  if (family === 'MiSans VF') {
+    return `'MiSans VF', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif`;
+  }
+  if (family === 'SF Pro') {
+    return `'SF Pro', 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', sans-serif`;
+  }
+  return `'${family}', sans-serif`;
+}
+
+function inferCrossAxisAlign(node, parentNode) {
+  if (!node?.box || !parentNode?.box || !parentNode?.flex) return null;
+  const isParentRow = parentNode.flex.direction === 'row';
+  const [pt, pr, pb, pl] = parentNode.flex.padding || [0, 0, 0, 0];
+  const parentCrossStart = isParentRow ? parentNode.box.absY + pt : parentNode.box.absX + pl;
+  const parentCrossSize = isParentRow
+    ? parentNode.box.height - pt - pb
+    : parentNode.box.width - pl - pr;
+  const childCrossStart = isParentRow ? node.box.absY : node.box.absX;
+  const childCrossSize = isParentRow ? node.box.height : node.box.width;
+  if (
+    parentCrossStart == null ||
+    parentCrossSize == null ||
+    childCrossStart == null ||
+    childCrossSize == null
+  ) {
+    return null;
+  }
+
+  const tol = 1;
+  const startGap = childCrossStart - parentCrossStart;
+  const endGap = parentCrossSize - childCrossSize - startGap;
+
+  if (Math.abs(startGap) <= tol && Math.abs(endGap) <= tol) return 'stretch';
+  if (Math.abs(startGap - endGap) <= tol) return 'center';
+  if (Math.abs(startGap) <= tol) return 'flex-start';
+  if (Math.abs(endGap) <= tol) return 'flex-end';
+  return null;
+}
+
+function hasResolvedMainAxisGeometry(node, parentNode, indexById) {
+  if (!node?.box || !parentNode?.box || !parentNode?.flex) return false;
+  const isParentRow = parentNode.flex.direction === 'row';
+  const [pt, pr, pb, pl] = parentNode.flex.padding || [0, 0, 0, 0];
+  const parentMainSize = isParentRow
+    ? parentNode.box.width - pl - pr
+    : parentNode.box.height - pt - pb;
+  if (parentMainSize == null) return false;
+
+  const flowChildren = (parentNode.childrenOrder || [])
+    .map((id) => indexById.get(id))
+    .filter((child) => child && child.positioning !== 'ABSOLUTE' && child.box);
+  if (flowChildren.length === 0) return false;
+
+  const gap = parentNode.flex.justify === 'SPACE_BETWEEN' ? 0 : parentNode.flex.effectiveGap || 0;
+  const summedMain = flowChildren.reduce((sum, child) => {
+    const size = isParentRow ? child.box.width : child.box.height;
+    return sum + (size || 0);
+  }, 0);
+  const total = summedMain + gap * Math.max(0, flowChildren.length - 1);
+  return Math.abs(total - parentMainSize) <= 1;
 }
 
 function emitRule(node, parentNode, indexById) {
@@ -115,12 +181,18 @@ function emitRule(node, parentNode, indexById) {
     // Figma FILL semantics: FILL along primary axis ⇒ share remaining main-axis space.
     // FILL along cross axis ⇒ stretch to parent cross-axis length.
     flexMainFill = (isParentRow && fillH) || (!isParentRow && fillV) || childInfo?.flexGrow === 1;
+    if (flexMainFill && hasResolvedMainAxisGeometry(node, parentNode, indexById)) {
+      flexMainFill = false;
+    }
     crossStretch = (isParentRow && fillV) || (!isParentRow && fillH);
     if (flexMainFill) {
       decls.push(['flex', '1 1 0']);
       decls.push([isParentRow ? 'min-width' : 'min-height', '0']);
     }
-    if (crossStretch) decls.push(['align-self', 'stretch']);
+    if (crossStretch) {
+      const inferredAlign = inferCrossAxisAlign(node, parentNode);
+      decls.push(['align-self', inferredAlign || 'stretch']);
+    }
   }
 
   // ───── Dimensions ─────
@@ -154,6 +226,10 @@ function emitRule(node, parentNode, indexById) {
     }
   }
   if (emitHeight && node.box.height != null) decls.push(['height', px(node.box.height)]);
+  if (node.minWidth != null) decls.push(['min-width', px(node.minWidth)]);
+  if (node.maxWidth != null) decls.push(['max-width', px(node.maxWidth)]);
+  if (node.minHeight != null) decls.push(['min-height', px(node.minHeight)]);
+  if (node.maxHeight != null) decls.push(['max-height', px(node.maxHeight)]);
 
   // Flex container
   if (node.flex) {
@@ -162,7 +238,7 @@ function emitRule(node, parentNode, indexById) {
     if (node.flex.wrap) decls.push(['flex-wrap', 'wrap']);
     const [pt, pr, pb, pl] = node.flex.padding;
     if (pt || pr || pb || pl) decls.push(['padding', [pt, pr, pb, pl].map(px).join(' ')]);
-    if (node.flex.effectiveGap != null && node.flex.effectiveGap > 0) {
+    if (node.flex.effectiveGap != null && node.flex.effectiveGap > 0 && node.flex.justify !== 'SPACE_BETWEEN') {
       decls.push(['gap', px(node.flex.effectiveGap)]);
     }
     const justifyMap = { MIN: 'flex-start', MAX: 'flex-end', CENTER: 'center', SPACE_BETWEEN: 'space-between' };
@@ -186,7 +262,7 @@ function emitRule(node, parentNode, indexById) {
   if (node.role === 'image' && !node.image?.path && node.image?.fallbackColor) {
     decls.push(['background-color', node.image.fallbackColor]);
   }
-  if (node.style.borderColor) {
+  if (node.style.borderColor && node.role !== 'vector') {
     const perSide = node.style.borderWidths;
     if (perSide) {
       const sides = ['top', 'right', 'bottom', 'left'];
@@ -204,7 +280,7 @@ function emitRule(node, parentNode, indexById) {
       decls.push(['border', `${px(node.style.borderWidth)} solid ${node.style.borderColor}`]);
     }
   }
-  const radius = formatRadii(node.style.borderRadii || node.style.borderRadius);
+  const radius = node.role === 'vector' ? null : formatRadii(node.style.borderRadii || node.style.borderRadius);
   if (radius) decls.push(['border-radius', radius]);
   if (node.style.opacity != null) decls.push(['opacity', node.style.opacity]);
 
@@ -219,7 +295,7 @@ function emitRule(node, parentNode, indexById) {
 
   // Text
   if (node.role === 'text' && node.text) {
-    if (node.text.fontFamily) decls.push(['font-family', `'${node.text.fontFamily}', sans-serif`]);
+    if (node.text.fontFamily) decls.push(['font-family', fontFamilyStack(node.text.fontFamily)]);
     if (node.text.fontSize) decls.push(['font-size', px(node.text.fontSize)]);
     if (node.text.fontWeight) decls.push(['font-weight', node.text.fontWeight]);
     if (node.text.lineHeight) decls.push(['line-height', node.text.lineHeight]);
@@ -231,6 +307,8 @@ function emitRule(node, parentNode, indexById) {
       decls.push(['color', node.text.color]);
     }
     if (node.text.textAlign) decls.push(['text-align', node.text.textAlign]);
+    if (node.text.textTransform) decls.push(['text-transform', node.text.textTransform]);
+    if (node.text.textDecoration) decls.push(['text-decoration', node.text.textDecoration]);
     // Single-line heuristic: Figma stores width exactly fitting one line; browser font
     // metrics diverge slightly, so text can wrap unexpectedly (e.g. "How-to" at the hyphen).
     // fontSize may be null for text inside COMPONENT INSTANCES (bridge doesn't expose segments

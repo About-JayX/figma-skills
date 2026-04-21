@@ -118,18 +118,40 @@ function extractEffects(effects) {
   return out;
 }
 
-function extractTextFromComputedHtml(html) {
-  if (!html || typeof html !== 'string') return null;
-  // Strip all tags, decode a few common entities
-  const stripped = html.replace(/<[^>]+>/g, '').trim();
-  if (!stripped) return null;
-  return stripped
+function decodeHtmlEntities(text) {
+  return String(text ?? '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
+}
+
+function extractTextFromComputedHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  // Strip all tags, decode a few common entities
+  const stripped = html.replace(/<[^>]+>/g, '').trim();
+  if (!stripped) return null;
+  return decodeHtmlEntities(stripped);
+}
+
+function extractTextRunsFromComputedHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  const matches = [...html.matchAll(/<span([^>]*)>([\s\S]*?)<\/span>/gi)];
+  if (matches.length === 0) return null;
+  const runs = matches
+    .map(([, attrs, inner]) => {
+      const content = decodeHtmlEntities(String(inner ?? '').replace(/<[^>]+>/g, ''));
+      const styleMatch = String(attrs ?? '').match(/style\s*=\s*"([^"]*)"/i);
+      const style = styleMatch ? parseComputedCss(styleMatch[1]) : {};
+      return {
+        content,
+        style,
+      };
+    })
+    .filter((run) => run.content.length > 0);
+  return runs.length > 0 ? runs : null;
 }
 
 // Bridge's computedCss.full is a CSS declaration string like
@@ -190,6 +212,7 @@ function parseBorderRadius(v) {
 
 function buildTextRun(node, parsedCss) {
   const segs = node.style?.textSegments || [];
+  const richRuns = extractTextRunsFromComputedHtml(node.computedHtml);
   // Content extraction — always prefer computedHtml first (Figma's rendered text
   // supports component-instance overrides, multi-run merges, and inline edits that
   // textSegments may miss). Fall back chain: computedHtml → segments concat → characters → name.
@@ -218,6 +241,9 @@ function buildTextRun(node, parsedCss) {
       letterSpacing: parsedCss['letter-spacing'] || null,
       color: parsedCss['color'] || null,
       textAlign: parsedCss['text-align'] || null,
+      textTransform: parsedCss['text-transform'] || null,
+      textDecoration: parsedCss['text-decoration'] || null,
+      runs: richRuns,
     };
   }
   const s = segs[0];
@@ -242,6 +268,9 @@ function buildTextRun(node, parsedCss) {
     })(),
     color: resolveSolidPaint(s.fills) || parsedCss['color'] || null,
     textAlign: parsedCss['text-align'] || null,
+    textTransform: parsedCss['text-transform'] || null,
+    textDecoration: parsedCss['text-decoration'] || null,
+    runs: richRuns,
   };
 }
 
@@ -395,6 +424,10 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
       positioning: layout.layoutPositioning || 'AUTO',
       sizingH: layout.layoutSizingHorizontal || null,
       sizingV: layout.layoutSizingVertical || null,
+      minWidth: layout.minWidth ?? null,
+      maxWidth: layout.maxWidth ?? null,
+      minHeight: layout.minHeight ?? null,
+      maxHeight: layout.maxHeight ?? null,
       clipsContent: !!layout.clipsContent,
       style: {
         bg: resolveSolidPaint(style.fills) ?? resolveSolidPaint(style.backgrounds) ?? null,
@@ -413,6 +446,7 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
         // B3 — border-radius: prefer Figma scalar/array; fall back to computedCss parse
         // (covers nodes where Figma only exposes radius via computed CSS, e.g. some INSTANCE)
         borderRadius: (() => {
+          if (node.type === 'ELLIPSE') return '50%';
           if (node.cornerRadius != null) return node.cornerRadius;
           const parsed = parseBorderRadius(parsedCss['border-radius']);
           return typeof parsed === 'number' ? parsed : null;
