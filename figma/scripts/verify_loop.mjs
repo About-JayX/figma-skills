@@ -18,10 +18,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn, spawnSync, execSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import net from 'net';
 import { fileURLToPath } from 'url';
 import { makePreview } from './lib/preview_image.mjs';
+import { launchBrowser } from './lib/browser.mjs';
+import { buildNodeIdPairs, captureDomSnapshot } from './lib/dom_snapshot.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -183,48 +185,115 @@ async function main() {
   let scoreReport = null;
   let lintReport = null;
   try {
-    // 3. Screenshot at 2x DPR — derive viewport from renderReady root box
+    // 3. Screenshot + DOM snapshot + diagnostics via playwright-core.
+    // Viewport is derived from renderReady root box so the PNG ends up exactly
+    // (winW × winH × DPR) with no post-crop. DOM snapshot is keyed by the
+    // render-ready node IDs (sanitized the same way emit_jsx.mjs sanitizes for
+    // HTML `id=`), so consumers can join bridge data ↔ rendered rect/computed.
     const t2 = Date.now();
     const shotDir = path.join(cacheDir, '_verify');
     fs.mkdirSync(shotDir, { recursive: true });
     const shotPath = path.join(shotDir, 'candidate-2x.png');
+    const domSnapshotPath = path.join(shotDir, 'dom-snapshot.json');
+    const diagPath = path.join(shotDir, 'page-diagnostics.json');
+
     let winW = 1280;
     let winH = 5412;
+    let nodeIdPairs = [];
     try {
       const rr = JSON.parse(fs.readFileSync(path.join(cacheDir, 'render-ready.json'), 'utf8'));
       const rootNode = rr.nodes.find((n) => n.id === rr.rootId);
       if (rootNode?.box?.width) winW = Math.ceil(rootNode.box.width);
       if (rootNode?.box?.height) winH = Math.ceil(rootNode.box.height);
+      nodeIdPairs = buildNodeIdPairs(rr.nodes);
     } catch {
       /* fall back to defaults */
     }
-    const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    // Chrome --headless=new produces a screenshot at exactly window-size × DPR
-    // with no browser-chrome overhead — request the design's CSS viewport
-    // directly so the resulting PNG is already the desired (winW × winH × DPR)
-    // and no post-crop is needed. Earlier versions added vertical padding and
-    // tried to trim with `sips -c … --cropOffset`, but sips's negative Y offset
-    // pads the top with black instead of anchoring the crop at the top, which
-    // baked a ~90 px black band into every candidate screenshot and tanked SSIM.
-    const chromeRes = runCmd(
-      chrome,
-      [
-        '--headless=new',
-        '--disable-gpu',
-        '--no-sandbox',
-        `--screenshot=${shotPath}`,
-        `--window-size=${winW},${winH}`,
-        '--force-device-scale-factor=2',
-        '--hide-scrollbars',
-        // 10s matches references/09-verification.md. Google Fonts can take
-        // 1–3s to fetch + swap; 5s was too tight and caused intermittent
-        // FOUC-like screenshots where text was captured pre-swap, inflating
-        // pixel diff. Bumping is cheap (only when verify runs).
-        '--virtual-time-budget=10000',
-        `http://localhost:${port}/`,
-      ],
-      { stdio: ['ignore', 'ignore', 'pipe'] }
+
+    const launched = await launchBrowser();
+    console.log(`[verify] browser source: ${launched.source}`);
+    const browser = launched.browser;
+
+    const consoleErrors = [];
+    const pageErrors = [];
+    const failedRequests = [];
+    let domNodes = null;
+    let browserSource = launched.source;
+
+    try {
+      const context = await browser.newContext({
+        viewport: { width: winW, height: winH },
+        deviceScaleFactor: 2,
+      });
+      const page = await context.newPage();
+
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') {
+          consoleErrors.push({ text: msg.text(), location: msg.location() });
+        }
+      });
+      page.on('pageerror', (err) => {
+        pageErrors.push({ message: err.message, stack: err.stack });
+      });
+      page.on('response', (resp) => {
+        const status = resp.status();
+        if (status >= 400) {
+          failedRequests.push({ url: resp.url(), status, method: resp.request().method() });
+        }
+      });
+
+      await page.goto(`http://localhost:${port}/`, { waitUntil: 'networkidle', timeout: 20000 });
+      // Explicit readiness gate: fonts swapped + all <img> decoded. Replaces
+      // the old `--virtual-time-budget=10000` blind wait, which captured FOUC
+      // screenshots on slow Google Fonts loads and tanked SSIM.
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        const imgs = Array.from(document.images);
+        await Promise.all(
+          imgs.map((img) => (img.complete ? Promise.resolve() : img.decode().catch(() => null)))
+        );
+      });
+
+      await page.screenshot({
+        path: shotPath,
+        clip: { x: 0, y: 0, width: winW, height: winH },
+      });
+
+      domNodes = await captureDomSnapshot(page, nodeIdPairs);
+
+      await context.close();
+    } finally {
+      try { await browser.close(); } catch { /* ignore */ }
+    }
+
+    fs.writeFileSync(
+      domSnapshotPath,
+      JSON.stringify(
+        {
+          capturedAt: new Date().toISOString(),
+          viewport: { width: winW, height: winH, deviceScaleFactor: 2 },
+          browserSource,
+          nodes: domNodes || [],
+        },
+        null,
+        2
+      )
     );
+    fs.writeFileSync(
+      diagPath,
+      JSON.stringify(
+        {
+          capturedAt: new Date().toISOString(),
+          browserSource,
+          consoleErrors,
+          pageErrors,
+          failedRequests,
+        },
+        null,
+        2
+      )
+    );
+
     // Emit a ≤1800px preview + sidecar meta for Claude Read. Original is kept
     // at 2x DPR for SSIM/pixel-diff scoring. Preview consumers MUST read the
     // sidecar `.meta.json` to recover the scale before quoting any pixel coord.
@@ -238,6 +307,7 @@ async function main() {
     }
     phases.screenshot = ((Date.now() - t2) / 1000).toFixed(2);
     phases.viewport = `${winW}x${winH}`;
+    phases.browserSource = browserSource;
 
     // 4. Lint
     const t3 = Date.now();
@@ -347,6 +417,8 @@ async function main() {
       heatmap: path.join(cacheDir, '_verify', 'scorecard-heatmap.png'),
       scoreReport: path.join(cacheDir, '_verify', 'scorecard.json'),
       lintReport: path.join(cacheDir, '_verify', 'lint-report.json'),
+      domSnapshot: path.join(cacheDir, '_verify', 'dom-snapshot.json'),
+      pageDiagnostics: path.join(cacheDir, '_verify', 'page-diagnostics.json'),
     },
   };
 
