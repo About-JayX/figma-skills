@@ -44,9 +44,10 @@
 
 用 headless Chrome 截页面，确保：
 
-- `--window-size` 与 baseline 同尺寸（1280 设计稿 = 1280×<height>；baseline 2x = 2560×<2h>）
-- `--force-device-scale-factor=2` 匹配 baseline 2x
-- `--virtual-time-budget=10000` 让 Google Fonts 加载
+- `--window-size=<design-w>,<design-h>` 用 **CSS 像素**（设计稿原尺寸，不预乘 DPR）
+- `--force-device-scale-factor=2` 把输出栅格化到 2x（产出 PNG 自动是 `2*W × 2*H`）
+- `--headless=new`（**必须**用新模式，旧 `--headless` 废弃且行为不一致）
+- `--virtual-time-budget=10000` 让 Google Fonts 加载完再截图
 - `--hide-scrollbars`
 
 ```bash
@@ -58,6 +59,17 @@
   --window-size=<design-w>,<design-h> \
   "http://localhost:<port>/index.html"
 ```
+
+### ⚠ 截图后处理：禁用 sips crop
+
+`--headless=new` 输出的 PNG 已经是精确的 `W*DPR × H*DPR`，**没有**任何浏览器 chrome overhead，**不需要**任何 post-crop。
+
+历史上 `verify_loop.mjs` 试图加 `chromeVPad` 然后用 `sips -c H W --cropOffset -90 0` 锚顶部，结果是：sips 的负 Y 偏移**不是**"锚顶部裁剪"，而是把整张图下移 90 行 + 顶部填黑边。每张 candidate 顶部被强行注入 90 px 黑色 → SSIM 永远卡在 0.48 左右无法收敛（错误归因于布局/字体问题，浪费多轮迭代）。
+
+**规则**：
+- 直接 `--window-size=W,H`（设计稿尺寸），不加任何 padding
+- **不要**用 `sips --cropOffset` 后处理 candidate（如果非要 crop，用 PIL `image.crop((x0,y0,x1,y1))` 或 `sips --cropToHeightWidth` + 严格验证输出像素和原图一致）
+- 校验方法：`python3 -c "from PIL import Image; print(Image.open('candidate.png').size)"` 必须等于 `(W*2, H*2)`
 
 ## scorecard 命令
 
@@ -137,7 +149,21 @@ python3 ./scripts/acceptance_pipeline.py \
 
 - **render diff**：pixel diff ratio / heatmap / diff bounds → **定位**差异
 - **perceptual diff**：SSIM / ΔE00 / 可选 LPIPS → **判阈值**
-- **plan diff**：当前 route / node signals / size mismatch / hard node → **决定修复动作**
+- **plan diff**：当前 route / node signals / size mismatch / hard node / delivery mode / locked regions → **决定修复动作**
+
+## SSIM 异常低（<0.7）的诊断顺序
+
+SSIM 数值反常低（baseline/candidate 视觉看起来接近，但分数<0.7 / pixel diff>30%）时，**严禁**先怀疑 CSS / 字体 / 布局。按下面顺序排除截图本身的问题：
+
+1. **截图尺寸是否 = 设计尺寸 × DPR**：`PIL.Image.open(candidate).size == (W*2, H*2)`，不等于 → 截图流程有 bug
+2. **顶部/底部是否有非预期黑/白带**：扫描 `candidate[y].mean()` 在 y=0..200，与 baseline 比对。任何一边在前 100 行突然变 0 或 255 → 99% 是 crop / padding bug
+3. **逐行 brightness profile 大致重合**：用 `python3 -c "from PIL import Image; import numpy as np; a=np.array(Image.open(p)); print([a[y].mean() for y in range(0,H*2,20)])"` 对两图各打一遍，大体走势必须一致
+4. **抽样不能只取 3 个点**：装饰性元素（齿状 / 网格 / 透明 overlay）的间隙位置容易被采样命中，得出"baseline 是白的"假象。最少要打 row-by-row brightness 而不是几个 pixel
+5. **raw screenshot 直接看一眼**：跑一次不带任何 post-crop 的 raw chrome 截图，PIL 读取看顶部 200 行，确认没有黑边
+
+只有以上 5 点都过了，才可以怀疑 CSS / 字体 / 布局。
+
+**反例**：曾经一个项目花了大半个会话依次怀疑了"字体没加载"、"section separator SVG 几何错"、"flex layout 偏移"，最后发现是 sips post-crop 在每张 candidate 顶部注入了 90 行黑色。诊断顺序错 → 浪费多轮 fix。
 
 ## 修复 plan 规则
 
@@ -148,6 +174,26 @@ python3 ./scripts/acceptance_pipeline.py \
 | color drift | `SYNC_COLOR_AND_EFFECTS` / 固定 colorProfile |
 | hard node drift | `FORCE_PRECISE_VECTOR_EXPORT` / 升级 SVG→CANVAS→RASTER |
 | text drift | `FIX_TEXT_METRICS` / 检查 font loading / 换行 / baseline / OpenType |
+| interaction hidden by overlay | 缩小 locked region / 把交互节点抬到 overlay 上层 / 从 `Visual-lock` 降回 `Hybrid-SVG` |
+
+## 交付模式与锁定区域
+
+验收时必须区分这次交付是哪一种：
+
+| 交付模式 | 说明 |
+|----------|------|
+| `DOM-first` | 最终像素主要来自 DOM/CSS，还原目标偏向真实结构 |
+| `Hybrid-SVG` | 局部 locked region 由 SVG/Canvas/Raster 提供，其余区域仍是 DOM |
+| `Visual-lock` | 大面积 locked region，甚至 page-level lock；优先视觉一致性 |
+
+locked region 指：
+- 最终像素由 SVG / Canvas / Raster 覆层提供的节点、子树或页面区域
+- 它们不应在报告里继续被描述成“普通 DOM fidelity 已通过”的区域
+
+如果项目使用了 `Hybrid-SVG` 或 `Visual-lock`：
+- report / summary / manifest 必须写出交付模式
+- 必须列出 locked regions（至少列 nodeId / 区域名 / route / 原因）
+- 必须说明这些区域里的交互是否仍然真实可用，还是仅保留审计壳层
 
 ## 输出物
 
@@ -166,12 +212,15 @@ python3 ./scripts/acceptance_pipeline.py \
 - [ ] manifest 完整，所有关键 entry 已跑完 scorecard
 - [ ] 失败 entry 已生成 action plan，可升级 route 已升级
 - [ ] rerender loop 已执行到收敛或达上限（3 轮）
+- [ ] 若使用 `Hybrid-SVG` / `Visual-lock`，交付模式与 locked regions 已记录
 - [ ] 最终 bundle 已打包
 - [ ] 结果说明中已列出：通过项 / 失败项 / 未验收项 / 已知偏差
 
 ## 最终输出格式（交付给用户）
 
 - 对照源（baseline 来源 + candidate 来源）
+- 交付模式（`DOM-first` / `Hybrid-SVG` / `Visual-lock`）
+- 锁定区域（locked regions）与升级理由
 - 已验收表面
 - 已检查维度（6 维：geometry / text / visual / states / route / diff）
 - 阈值结果：通过项 + 失败项

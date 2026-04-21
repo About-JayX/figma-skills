@@ -150,6 +150,13 @@ function pxNum(v) {
   return m ? Number(m[1]) : null;
 }
 
+function isSvgIslandNode(node) {
+  return node?.svgRef?.kind === 'svg' && (
+    node?.replay?.routeHint === 'SVG_ISLAND' ||
+    node?.replay?.verificationTier === 'hard-node'
+  );
+}
+
 // ────────────────── Checks ──────────────────
 
 // L1: Σ child main-axis + gap·(n-1) + padding ≤ parent main-axis
@@ -163,6 +170,10 @@ function checkL1Geometry(nodes, renderReadyIndex) {
       (c) => c.visible !== false && c.layout?.layoutPositioning !== 'ABSOLUTE'
     );
     if (kids.length < 2) continue;
+    // Hard nodes routed as SVG islands should be verified visually, not by
+    // decomposed flex geometry. Their bridge children often describe internal
+    // vector groupings that intentionally overflow the parent box.
+    if (isSvgIslandNode(n)) continue;
     const isH = l.layoutMode === 'HORIZONTAL';
     const sum = kids.reduce((s, c) => s + (isH ? c.layout?.width ?? 0 : c.layout?.height ?? 0), 0);
     const rawGapTotal = (l.itemSpacing || 0) * (kids.length - 1);
@@ -206,6 +217,7 @@ function checkL4EffectiveGap(nodes, rules) {
     if (!l || !['HORIZONTAL', 'VERTICAL'].includes(l.layoutMode)) continue;
     const kids = (n.children || []).filter((c) => c.visible !== false);
     if (kids.length < 2) continue;
+    if (isSvgIslandNode(n)) continue;
     const eff = computeEffectiveGap(n, kids);
     if (!eff || !eff.uniform) continue;
     const rule = findRuleForNode(rules, n);
@@ -394,11 +406,19 @@ function checkL8ImageReferences(cssSrc, elements, assetsDir, cssPath, jsxPath) {
   }
 
   // JSX <img src="..."> / <source src="...">
+  // Absolute `/foo.ext` refs follow Vite convention → resolve against <project>/public/
+  const projectRoot = path.resolve(jsxDir, '..');
+  const publicDir = path.join(projectRoot, 'public');
   for (const el of elements) {
     const src = el.attrs?.src;
     if (!src) continue;
     if (src.startsWith('data:') || src.startsWith('http')) continue;
-    const abs = path.resolve(jsxDir, src);
+    let abs;
+    if (src.startsWith('/')) {
+      abs = path.join(publicDir, src.slice(1));
+    } else {
+      abs = path.resolve(jsxDir, src);
+    }
     if (fs.existsSync(abs)) continue;
     violations.push({
       id: 'L8',
@@ -416,8 +436,11 @@ function checkL6TextContent(nodes, jsxTexts) {
   for (const { node: n } of nodes) {
     if (n.type === 'TEXT') {
       if (n.name) bank.add(n.name.trim());
-      const segs = n.style?.textSegments || [];
-      for (const s of segs) if (s?.characters) bank.add(s.characters.trim());
+      // Bridge schema: text.characters (full string) + text.segments[].characters
+      const txt = n.text;
+      if (txt?.characters) bank.add(String(txt.characters).trim());
+      const segs = txt?.segments || n.style?.textSegments || [];
+      for (const s of segs) if (s?.characters) bank.add(String(s.characters).trim());
     }
   }
   // Add every node name as a weak candidate (covers cases where agent uses node name as label)
