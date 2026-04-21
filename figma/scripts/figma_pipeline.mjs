@@ -21,6 +21,10 @@ import { fileURLToPath } from 'url';
 import { gradientPaintToCss } from './lib/gradient_to_css.mjs';
 import { enrichNodeTokens, buildSubstitutionMap } from './lib/variable_substitution.mjs';
 import { enrichComputedCss as enrichFullComputedCss } from './lib/computed_css.mjs';
+import { makePreview } from './lib/preview_image.mjs';
+import { buildOutline } from './lib/outline.mjs';
+import { externalizeInferredVariables, externalizeVectorGeometry } from './lib/sidecar_externalize.mjs';
+import { buildGlobals } from './lib/globals_dedup.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -345,6 +349,21 @@ function generateBaseline(cacheDir, data) {
     return null;
   }
 
+  // Emit a ≤1800px preview + sidecar meta so Claude can Read the baseline
+  // without hitting the 2000px many-image limit. Original is left untouched
+  // for SSIM/pixel-diff scoring. Consumers reading the preview MUST load
+  // the meta sidecar to recover the scale ratio.
+  const emitPreview = (pngPath) => {
+    try {
+      const res = makePreview(pngPath);
+      if (res && !res.skipped) {
+        console.log(`  ✓ baseline preview 生成: ${res.preview} (scale recorded in ${path.basename(res.meta)})`);
+      }
+    } catch (e) {
+      console.log(`  ⚠ baseline preview 失败: ${e.message}`);
+    }
+  };
+
   // A8 path: plugin may have uploaded a frame PNG baseline as
   // assets/_baseline_<node-id>.png. If present, promote it to baseline/baseline.png
   // and return directly.
@@ -361,6 +380,7 @@ function generateBaseline(cacheDir, data) {
       fs.copyFileSync(src, dst);
       const size = fs.statSync(dst).size;
       console.log(`  ✓ baseline 生成 (plugin A8): ${dst} (${(size / 1024).toFixed(0)}KB)`);
+      emitPreview(dst);
       return dst;
     }
   }
@@ -393,6 +413,7 @@ function generateBaseline(cacheDir, data) {
     if (result !== null || fs.existsSync(pngPath)) {
       const size = fs.statSync(pngPath).size;
       console.log(`  ✓ baseline 生成 (rsvg): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
+      emitPreview(pngPath);
       return pngPath;
     }
     console.log('  ⚠ rsvg-convert 失败，尝试 Chrome fallback...');
@@ -410,10 +431,20 @@ function generateBaseline(cacheDir, data) {
     return null;
   }
 
-  const chromeResult = run(`"${chrome}" --headless --disable-gpu --screenshot="${pngPath}" --window-size=2880,2048 --force-device-scale-factor=2 "file://${path.resolve(svgPath)}"`);
+  // Window-size is in CSS px; --force-device-scale-factor=2 multiplies the
+  // raster output. Earlier this passed `--window-size=2880,2048 --DPR=2`,
+  // which double-scaled to a 5760x4096 PNG and broke baseline-vs-candidate
+  // pixel alignment. Derive the design size from data.designSnapshot.root,
+  // fall back to 1440x900 if missing. Use --headless=new (modern, no chrome
+  // overhead — same reasoning as verify_loop's screenshot path).
+  const rootBox = data?.designSnapshot?.root?.layout?.absoluteBoundingBox || {};
+  const cssW = Math.ceil(rootBox.width || 1440);
+  const cssH = Math.ceil(rootBox.height || 900);
+  const chromeResult = run(`"${chrome}" --headless=new --disable-gpu --no-sandbox --screenshot="${pngPath}" --window-size=${cssW},${cssH} --force-device-scale-factor=2 --hide-scrollbars "file://${path.resolve(svgPath)}"`);
   if (fs.existsSync(pngPath)) {
     const size = fs.statSync(pngPath).size;
     console.log(`  ✓ baseline 生成 (chrome): ${pngPath} (${(size / 1024).toFixed(0)}KB)`);
+    emitPreview(pngPath);
     return pngPath;
   }
 
@@ -548,17 +579,89 @@ async function main() {
     const ccCtx = { assetFiles };
     const fullEnriched = enrichFullComputedCss(agentPayload?.designSnapshot?.root, ccCtx);
     if (fullEnriched > 0) {
-      fs.writeFileSync(payloadPath, JSON.stringify(agentPayload, null, 2));
       const inlined = ccCtx.inlinedSvgs || 0;
       console.log(
         `\n[1.10/5] computedCss 全量: ${fullEnriched} 个节点挂载 computedCss.full / computedHtml` +
         (inlined > 0 ? `（其中 ${inlined} 个 SVG 已 inline）` : '')
       );
     }
+
+    // Sidecar externalization (MCP-style progressive disclosure) — run AFTER
+    // all enrichments so the main bridge-agent-payload shrinks before the
+    // single re-save below. All helpers are idempotent (return nodes: 0 if
+    // already processed on a previous run).
+    const root = agentPayload?.designSnapshot?.root;
+    const extInf = root ? externalizeInferredVariables(root, cacheDir) : null;
+    const extGeo = root ? externalizeVectorGeometry(root, cacheDir) : null;
+    const extInfMb = extInf ? (extInf.bytesRemoved / 1024 / 1024).toFixed(2) : '0.00';
+    const extGeoMb = extGeo ? (extGeo.bytesRemoved / 1024 / 1024).toFixed(2) : '0.00';
+    if (extInf?.nodes || extGeo?.nodes) {
+      console.log(
+        `\n[1.11/5] 外部化 sidecar:` +
+        (extInf?.nodes ? ` variables.inferred (${extInf.nodes} 节点, -${extInfMb}MB) → variables-inferred.json;` : '') +
+        (extGeo?.nodes ? ` vector.geometry (${extGeo.nodes} 节点, -${extGeoMb}MB) → blobs/geom-*.json` : '')
+      );
+    }
+
+    // Globals dedup (MCP-style — one canonical copy per unique paint / stroke
+    // / effect bundle, referenced by stable hash from each node). Additive:
+    // inline `style.fills/strokes/effects` stay; we attach `style.fillId`
+    // etc. next to them. globals.json written to cache root.
+    let globalsStats = null;
+    if (root) {
+      const { globals, stats } = buildGlobals(root);
+      if (stats.hits.fills || stats.hits.strokes || stats.hits.effects) {
+        const globalsPath = path.join(cacheDir, 'globals.json');
+        fs.writeFileSync(
+          globalsPath,
+          JSON.stringify(
+            {
+              schemaVersion: 1,
+              generatedAt: new Date().toISOString(),
+              note: 'Content-hashed paint/stroke/effect bundles, referenced per-node via style.fillId / strokeId / effectId. Inline style.fills[]/strokes[]/effects[] on each node are STILL present in bridge-agent-payload.json for backward compat.',
+              stats,
+              ...globals,
+            },
+            null,
+            2
+          )
+        );
+        globalsStats = stats;
+        console.log(
+          `\n[1.12/5] globals.json: ${stats.hits.fills} fills → ${stats.uniqueFills} unique; ` +
+          `${stats.hits.strokes} strokes → ${stats.uniqueStrokes}; ` +
+          `${stats.hits.effects} effects → ${stats.uniqueEffects}`
+        );
+      }
+    }
+
+    // Single re-save after all enrichment + externalization + globals id refs.
+    if (fullEnriched > 0 || extInf?.nodes || extGeo?.nodes || globalsStats) {
+      fs.writeFileSync(payloadPath, JSON.stringify(agentPayload, null, 2));
+    }
   }
   mergeCache(resolvedUrl);
   const warnings = crossValidate(cacheDir, agentPayload);
   const baselinePath = generateBaseline(cacheDir, agentPayload);
+
+  // Sparse outline sidecar — always emitted after bridge extract so LLMs /
+  // tooling can plan against cheap node metadata without reading the 9MB
+  // payload. Written to <cacheDir>/outline.json. render_ready.mjs also emits
+  // this when it runs (e.g. via --auto codegen); emitting here too means
+  // non-auto runs still get the artifact.
+  try {
+    const outlineRoot = agentPayload?.designSnapshot?.root;
+    if (outlineRoot) {
+      const outline = buildOutline(outlineRoot);
+      const outlinePath = path.join(cacheDir, 'outline.json');
+      fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2));
+      const sizeKb = (fs.statSync(outlinePath).size / 1024).toFixed(1);
+      console.log(`\n[artifact] outline.json (${outline.totalNodes} nodes, ${sizeKb}KB): ${outlinePath}`);
+    }
+  } catch (e) {
+    console.log(`\n[artifact] outline.json 生成失败: ${e.message}`);
+  }
+
   summary(agentResult, warnings, baselinePath);
   agentPayload = null; // release for GC
 

@@ -126,8 +126,8 @@ assert(css.includes('family=Crimson+Text'), 'B2: Crimson Text family in @import'
 assert(/wght@(400|700)/.test(css), 'B2: weight spec included');
 assert(css.indexOf('@import') < css.indexOf('/* reset */'), 'B2: @import placed before reset');
 
-// ─── TEST 3: emit_css non-Google font family doesn't trigger @import ───
-console.log('\n[B2 negative] emit_css ignores unknown font families');
+// ─── TEST 3: emit_css does NOT gate unknown families behind an allowlist ───
+console.log('\n[B2 no-allowlist] emit_css still requests unknown font families');
 const rr3Path = path.join(tmp, 'rr3.json');
 fs.writeFileSync(rr3Path, JSON.stringify({
   schemaVersion: 1, rootId: '1:1', rootClass: 'n-1-1', palette: [], assetsManifest: [], svgManifest: [],
@@ -140,7 +140,8 @@ fs.writeFileSync(rr3Path, JSON.stringify({
 const cssOut3 = path.join(tmp, 'App3.css');
 spawnSync(process.execPath, [path.join(__dirname, 'emit_css.mjs'), rr3Path, cssOut3], { encoding: 'utf8' });
 const css3 = fs.readFileSync(cssOut3, 'utf8');
-assert(!css3.includes('@import'), 'B2 negative: unknown font → no @import');
+assert(css3.includes("@import url('https://fonts.googleapis.com/css2?"), 'B2 no-allowlist: unknown font still emits @import');
+assert(css3.includes('family=WeirdCustomFont'), 'B2 no-allowlist: unknown family preserved in request');
 
 // ─── Summary ───
 console.log(`\n── Total: ${passed} passed, ${failed} failed ──`);

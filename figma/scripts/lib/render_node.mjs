@@ -120,3 +120,99 @@ export function collectFontFamilies(root) {
   walk(root);
   return order;
 }
+
+// Map Figma fontName.style ("Bold", "ExtraLight Italic", numeric "700") to
+// { weight: number, italic: boolean }. Centralised so every emitter ships the
+// same Google Fonts request — previously each call site shipped a different
+// (often incomplete) weight list and unsupported families were silently
+// dropped, which let the browser fall back to system fonts and tank SSIM.
+const FIGMA_STYLE_TO_WEIGHT = {
+  thin: 100, hairline: 100,
+  extralight: 200, ultralight: 200,
+  light: 300,
+  regular: 400, normal: 400, book: 400,
+  medium: 500,
+  semibold: 600, demibold: 600,
+  bold: 700,
+  extrabold: 800, ultrabold: 800, heavy: 800,
+  black: 900,
+};
+
+function parseFigmaStyle(style) {
+  if (style == null) return { weight: 400, italic: false };
+  const s = String(style).trim();
+  if (!s) return { weight: 400, italic: false };
+  const italic = /italic|oblique/i.test(s);
+  const cleaned = s.replace(/italic|oblique/gi, '').replace(/\s+/g, '').toLowerCase();
+  if (FIGMA_STYLE_TO_WEIGHT[cleaned]) return { weight: FIGMA_STYLE_TO_WEIGHT[cleaned], italic };
+  const n = parseInt(cleaned, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 1000) return { weight: n, italic };
+  return { weight: 400, italic };
+}
+
+// Walk the tree, return Map<family, { weights: Set<number>, italic: boolean }>.
+// Pulls weight + italic from text.fontName.style AND each segment.fontName.style
+// (numeric text.fontWeight is also accepted as a fallback). Used by every
+// emitter that builds a Google Fonts URL so they all request the same
+// (complete) set of axes.
+export function collectFontFamilyWeights(root) {
+  const map = new Map();
+  function add(family, style, weight) {
+    if (typeof family !== 'string' || family.length === 0) return;
+    const parsed = parseFigmaStyle(style);
+    const finalWeight = (typeof weight === 'number' && weight > 0) ? weight : parsed.weight;
+    if (!map.has(family)) map.set(family, { weights: new Set(), italic: false });
+    const entry = map.get(family);
+    entry.weights.add(finalWeight);
+    if (parsed.italic) entry.italic = true;
+  }
+  function walk(node) {
+    const t = node?.text;
+    if (t) {
+      add(t.fontName?.family, t.fontName?.style, typeof t.fontWeight === 'number' ? t.fontWeight : null);
+      for (const seg of t.segments || []) {
+        add(seg.fontName?.family, seg.fontName?.style, typeof seg.fontWeight === 'number' ? seg.fontWeight : null);
+      }
+    }
+    for (const c of node?.children || []) walk(c);
+  }
+  walk(root);
+  return map;
+}
+
+// render-ready variant: emit_css consumes render-ready.json (flat node list,
+// `text.fontFamily` + `text.fontWeight` as string/number, no fontName.style),
+// not the bridge-payload tree. Italic isn't preserved at the render-ready
+// stage, so this variant returns italic=false; codegen_pipeline's <link> still
+// requests italic via the bridge-shape collector for accurate font metrics.
+export function collectFontFamilyWeightsFromRenderReady(nodes) {
+  const map = new Map();
+  for (const n of nodes || []) {
+    if (n?.role !== 'text' || !n.text) continue;
+    const fam = n.text.fontFamily;
+    if (typeof fam !== 'string' || !fam.length) continue;
+    const parsed = parseFigmaStyle(n.text.fontWeight);
+    if (!map.has(fam)) map.set(fam, { weights: new Set(), italic: false });
+    map.get(fam).weights.add(parsed.weight);
+  }
+  return map;
+}
+
+// Build a single Google Fonts CSS2 URL from collectFontFamilyWeights output.
+// Returns '' when the map is empty so callers can branch cleanly.
+// Format: family=<Name>:ital,wght@0,<w1>;0,<w2>;1,<w1>;1,<w2>&family=...&display=swap
+export function buildGoogleFontsHref(familyWeights) {
+  if (!familyWeights || familyWeights.size === 0) return '';
+  const parts = [];
+  for (const [family, { weights, italic }] of [...familyWeights.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const sortedWeights = [...weights].sort((a, b) => a - b);
+    const encoded = encodeURIComponent(family).replace(/%20/g, '+');
+    if (italic) {
+      const tuples = sortedWeights.flatMap((w) => [`0,${w}`, `1,${w}`]);
+      parts.push(`family=${encoded}:ital,wght@${tuples.join(';')}`);
+    } else {
+      parts.push(`family=${encoded}:wght@${sortedWeights.join(';')}`);
+    }
+  }
+  return `https://fonts.googleapis.com/css2?${parts.join('&')}&display=swap`;
+}

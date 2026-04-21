@@ -13,6 +13,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { buildOutline } from './lib/outline.mjs';
+import { collapseVectorGroups } from './lib/vector_collapse.mjs';
 
 const GEOMETRY_TOL = 0.5;
 
@@ -445,10 +447,21 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
 
 // ────────────── main ──────────────
 
+function parseRenderReadyArgs(argv) {
+  const args = { cacheDir: null, collapseVectorGroups: false };
+  for (let i = 2; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--collapse-vector-groups') args.collapseVectorGroups = true;
+    else if (!a.startsWith('--') && !args.cacheDir) args.cacheDir = a;
+  }
+  return args;
+}
+
 function main() {
-  const cacheDir = process.argv[2];
+  const parsed = parseRenderReadyArgs(process.argv);
+  const cacheDir = parsed.cacheDir;
   if (!cacheDir) {
-    console.error('Usage: render_ready.mjs <cache-dir>');
+    console.error('Usage: render_ready.mjs <cache-dir> [--collapse-vector-groups]');
     process.exit(2);
   }
   const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
@@ -505,14 +518,38 @@ function main() {
     },
   };
 
+  // Optional pure-vector subtree collapse (MCP-style) — opt-in via
+  // --collapse-vector-groups. Off by default because Figma's per-vector
+  // transform/mask/blend can diverge from a translate-only composite; when
+  // disabled, subtrees are emitted node-by-node like before.
+  let collapseReport = null;
+  if (parsed.collapseVectorGroups) {
+    collapseReport = collapseVectorGroups(root, out, cacheDir);
+    if (collapseReport.collapsed > 0) {
+      out.stats.collapsedVectorGroups = collapseReport.collapsed;
+      out.stats.totalNodes = out.nodes.length;
+    }
+  }
+
   const outPath = path.join(cacheDir, 'render-ready.json');
   fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
+
+  // Sparse outline sidecar (MCP `get_metadata`-equivalent). Cheap planning
+  // artifact — every node across the raw bridge tree with just geometry +
+  // hierarchy, for LLMs/tools that need to reason about structure without
+  // loading the full payload. Always emitted next to render-ready.json.
+  const outline = buildOutline(root);
+  const outlinePath = path.join(cacheDir, 'outline.json');
+  fs.writeFileSync(outlinePath, JSON.stringify(outline, null, 2));
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         out: outPath,
-        stats: out.stats,
+        outline: outlinePath,
+        stats: { ...out.stats, outlineNodes: outline.totalNodes },
+        collapse: collapseReport ? { collapsed: collapseReport.collapsed } : null,
       },
       null,
       2

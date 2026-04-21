@@ -126,3 +126,33 @@
 | `cross-validation-report.json` | pipeline 跑的 HIGH/MEDIUM/INFO 警告列表 |
 
 **HIGH 警告必须在写代码前处理**（退回检查相关字段，确认取值来源）。
+
+## Cache 根 sidecar（每个 `cache/<fileKey>/<nodeId>/` 下）
+
+| 文件 | 用途 | 何时读 |
+|------|------|-------|
+| `bridge-agent-payload.json` | 完整富集 payload（9MB 级）—— 字段级权威源 | 下钻到具体节点字段时 |
+| `render-ready.json` | 扁平 / 去隐藏 / 富集后的消费格式（200KB 级） | emit_jsx / emit_css 走它 |
+| **`outline.json`** | **稀疏 tree（id/parentId/type/x/y/w/h/depth/visible），**对标 MCP `get_metadata`**。跨树推理 / 规划子树 / agent 定位节点时**第一份读的文件**（~50-400KB）** | **planning pass —— 先 outline 后下钻** |
+| **`globals.json`** | **Content-hash 去重后的 paint / stroke / effect bundle，每个节点通过 `style.fillId`/`strokeId`/`effectId` 引用。inline 数组仍保留向后兼容** | 需要按主题复用色板 / 批量查同色节点时 |
+| **`variables-inferred.json`** | **Figma 按属性猜测的候选 variable 绑定，按 nodeId 聚合。纯 informational，pipeline 本身不读** | 做 design-system 反向映射时 |
+| `variables-substitution-map.json` | token 别名 / 解析值映射 | 有 `variables.bound` 时 |
+| `cross-validation-report.json` | HIGH/MEDIUM/INFO 警告 | 写代码前 |
+| `cache-manifest.json` | 所有 cache 文件 + 资源 metadata 索引 | 查 imageHash / svgRef → 文件名 |
+| `baseline/baseline.png` + `.meta.json` | Figma 原生 2x PNG + 预览元信息 | 像素对照时 |
+| `blobs/svg-*.svg` | 大于 4KB 的 vector SVG blob | 仅被 JSX `<img>` 引用 |
+| `assets/<hash>.<ext>` | IMAGE fill 资源 | render-ready `image.path` 指向 |
+
+**outline.json 规则**：
+- 由 `buildOutline()` 在 bridge extract / render_ready 两处都 emit，保证非 `--auto` 模式也有
+- 包含**所有节点**（visible 字段标注可见性），用法跟 MCP `get_metadata` 一致
+- 仅作规划用途，不是字段级真源 —— 要读 fill / effects / text 等，仍必须回 `bridge-agent-payload.json`
+
+**globals.json 规则**：
+- 由 `buildGlobals()` 在 enrichment 之后生成，每个 fills/strokes/effects 数组按 SHA-256 前 10 位 hash 成稳定 id（`f_xxxx` / `s_xxxx` / `e_xxxx`）
+- 节点上新增的 `style.fillId`/`strokeId`/`effectId` 是**并列字段**，与原 inline `style.fills[]` 等**同时存在**。当前 emitter 仍读 inline，新 emitter 可选 opt-in 到 id 引用
+- 用途：做 CSS 变量 / 设计系统色板生成、或批量查"有相同 fill 的所有节点"时直接查 globals 表，不用全树扫
+
+**variables-inferred.json 规则**：
+- `externalizeInferredVariables()` 把节点层 `variables.inferred` 搬到 sidecar，按 nodeId 键聚合。pipeline 本身不读（只读 `variables.bound`）—— 移出去是为了 bridge payload 瘦身（约 70% 体积）
+- 需要这份建议数据时显式 `fs.readFileSync(variables-inferred.json)` 再查 `byNodeId[<id>]`

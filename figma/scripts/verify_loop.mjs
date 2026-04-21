@@ -21,6 +21,7 @@ import path from 'path';
 import { spawn, spawnSync, execSync } from 'child_process';
 import net from 'net';
 import { fileURLToPath } from 'url';
+import { makePreview } from './lib/preview_image.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -198,6 +199,13 @@ async function main() {
       /* fall back to defaults */
     }
     const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    // Chrome --headless=new produces a screenshot at exactly window-size × DPR
+    // with no browser-chrome overhead — request the design's CSS viewport
+    // directly so the resulting PNG is already the desired (winW × winH × DPR)
+    // and no post-crop is needed. Earlier versions added vertical padding and
+    // tried to trim with `sips -c … --cropOffset`, but sips's negative Y offset
+    // pads the top with black instead of anchoring the crop at the top, which
+    // baked a ~90 px black band into every candidate screenshot and tanked SSIM.
     const chromeRes = runCmd(
       chrome,
       [
@@ -208,11 +216,26 @@ async function main() {
         `--window-size=${winW},${winH}`,
         '--force-device-scale-factor=2',
         '--hide-scrollbars',
-        '--virtual-time-budget=5000',
+        // 10s matches references/09-verification.md. Google Fonts can take
+        // 1–3s to fetch + swap; 5s was too tight and caused intermittent
+        // FOUC-like screenshots where text was captured pre-swap, inflating
+        // pixel diff. Bumping is cheap (only when verify runs).
+        '--virtual-time-budget=10000',
         `http://localhost:${port}/`,
       ],
       { stdio: ['ignore', 'ignore', 'pipe'] }
     );
+    // Emit a ≤1800px preview + sidecar meta for Claude Read. Original is kept
+    // at 2x DPR for SSIM/pixel-diff scoring. Preview consumers MUST read the
+    // sidecar `.meta.json` to recover the scale before quoting any pixel coord.
+    try {
+      const prevRes = makePreview(shotPath);
+      if (prevRes && !prevRes.skipped) {
+        console.log(`[verify] candidate preview: ${prevRes.preview}`);
+      }
+    } catch (e) {
+      console.warn('[verify] candidate preview failed:', e.message);
+    }
     phases.screenshot = ((Date.now() - t2) / 1000).toFixed(2);
     phases.viewport = `${winW}x${winH}`;
 
@@ -319,6 +342,8 @@ async function main() {
     guard: guardAction,
     artifacts: {
       candidate: path.join(cacheDir, '_verify', 'candidate-2x.png'),
+      candidatePreview: path.join(cacheDir, '_verify', 'candidate-2x-preview.png'),
+      candidatePreviewMeta: path.join(cacheDir, '_verify', 'candidate-2x-preview.meta.json'),
       heatmap: path.join(cacheDir, '_verify', 'scorecard-heatmap.png'),
       scoreReport: path.join(cacheDir, '_verify', 'scorecard.json'),
       lintReport: path.join(cacheDir, '_verify', 'lint-report.json'),

@@ -425,7 +425,10 @@ export function buildTextDefaults(node) {
 
 // ===== Full CSS (aggregated inline style string) =====
 
-export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
+// Internal: build the parts object (camelCase keys → CSS values). The public
+// buildFullCss serialises it; buildFullCssWithTokens also serialises it but
+// replaces values where a Figma variable binding exists.
+function buildFullCssParts(node, parentLayout, precomputedGradient, ctx) {
   const parts = {};
   const box = buildNodeBox(node.layout);
   const pos = buildNodePositioning(node.layout, parentLayout);
@@ -465,8 +468,67 @@ export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
   if (textDef) {
     for (const k of Object.keys(textDef)) parts[k] = textDef[k];
   }
+  return parts;
+}
+
+export function buildFullCss(node, parentLayout, precomputedGradient, ctx) {
+  const parts = buildFullCssParts(node, parentLayout, precomputedGradient, ctx);
   if (Object.keys(parts).length === 0) return null;
   return Object.entries(parts).map(([k, v]) => `${kebab(k)}: ${v}`).join('; ');
+}
+
+// Emit the same `parts` object but with any property whose token binding is
+// present in `tokens` (from variable_substitution.buildNodeTokens) replaced
+// with `var(--figma-var-slug)`. Matches MCP's get_code / get_variable_defs
+// split: bit-faithful resolved values stay on `full`, theme-ready var()
+// references go on `withTokens`.
+//
+// Returns null when no substitution fires, so callers don't emit a
+// redundant duplicate of buildFullCss output.
+//
+// Two wrinkles the naive "replace by key" approach misses:
+//   1. `fills` binding maps (per FIGMA_PROP_TO_CSS) to `color`, but on
+//      container nodes the actual CSS property is `background-color`. We
+//      accept the `color` token for either.
+//   2. `buildFullCss` collapses `padding-top/right/bottom/left` into the
+//      `padding` shorthand. If any padding-* binding exists, we split back
+//      into the four long-hands so the var() substitution is faithful.
+export function buildFullCssWithTokens(node, parentLayout, precomputedGradient, ctx, tokens) {
+  if (!tokens || typeof tokens !== 'object' || Object.keys(tokens).length === 0) return null;
+  const parts = buildFullCssParts(node, parentLayout, precomputedGradient, ctx);
+  if (Object.keys(parts).length === 0) return null;
+
+  // Expand padding shorthand back into long-hand if any padding-* token exists.
+  const paddingTokens = ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'].some((k) => tokens[k]);
+  if (paddingTokens && parts.padding) {
+    // Padding shorthand format from buildNodeBox: "top right bottom left" (space-separated).
+    const p = String(parts.padding).trim().split(/\s+/);
+    if (p.length === 4) {
+      parts.paddingTop = p[0];
+      parts.paddingRight = p[1];
+      parts.paddingBottom = p[2];
+      parts.paddingLeft = p[3];
+      delete parts.padding;
+    }
+  }
+
+  let hits = 0;
+  const serialized = [];
+  for (const [k, v] of Object.entries(parts)) {
+    const kebabKey = kebab(k);
+    // Accept `color` token for a container's `background-color` too — the
+    // fills→color mapping in variable_substitution doesn't distinguish
+    // TEXT vs container.
+    const tok = tokens[kebabKey] || (kebabKey === 'background-color' ? tokens['color'] : null);
+    if (tok && tok.cssVar) {
+      serialized.push(`${kebabKey}: var(${tok.cssVar})`);
+      hits += 1;
+    } else {
+      serialized.push(`${kebabKey}: ${v}`);
+    }
+  }
+  if (hits === 0) return null;
+  return serialized.join('; ');
 }
 
 // ===== Tree walker =====
@@ -513,6 +575,16 @@ export function enrichComputedCss(root, ctx) {
     if (full) {
       node.computedCss.full = full;
       count += 1;
+    }
+    // MCP-style token preservation: when this node has variable bindings
+    // (enriched earlier by variable_substitution.enrichNodeTokens), also
+    // emit a parallel `computedCss.withTokens` where bound properties use
+    // `var(--token)` instead of the resolved hex/px value. Consumers can
+    // pick: `full` for bit-faithful output, `withTokens` for theme-ready CSS.
+    const tokens = node.computedCss?.tokens;
+    if (full && tokens) {
+      const withTokens = buildFullCssWithTokens(node, parentLayout, preGradient, ctx, tokens);
+      if (withTokens) node.computedCss.withTokens = withTokens;
     }
 
     if (node.type === 'TEXT') {

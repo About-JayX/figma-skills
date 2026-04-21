@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { collectFontFamilyWeights, buildGoogleFontsHref } from './lib/render_node.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -133,9 +134,36 @@ function copyAssets(cache, outSrc, outRoot) {
   }
 }
 
-function scaffoldVite(out, projectName) {
+// Build a Google Fonts <link> block from the bridge agent payload (the
+// authoritative source for which families + weights + italic the design uses).
+// Emits to <head> as <link rel="stylesheet"> rather than CSS @import because
+// <link> is parallel-fetched by the browser, while @import waits for the
+// stylesheet to parse — under verify_loop's --virtual-time-budget the
+// difference can be the screenshot capturing before fonts swap in.
+function buildGoogleFontsLinkFromCache(cacheDir) {
+  const payloadPath = path.join(cacheDir, 'bridge-agent-payload.json');
+  if (!fs.existsSync(payloadPath)) return '';
+  let root;
+  try {
+    const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
+    root = payload?.designSnapshot?.root || payload?.root || payload;
+  } catch {
+    return '';
+  }
+  const familyWeights = collectFontFamilyWeights(root);
+  const href = buildGoogleFontsHref(familyWeights);
+  if (!href) return '';
+  return [
+    '    <link rel="preconnect" href="https://fonts.googleapis.com" />',
+    '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />',
+    `    <link rel="stylesheet" href="${href}" />`,
+  ].join('\n');
+}
+
+function scaffoldVite(out, projectName, cacheDir) {
   console.log('[4/4] scaffold Vite shell…');
   const name = projectName || `gen-${path.basename(out)}`;
+  const fontsLink = buildGoogleFontsLinkFromCache(cacheDir);
   fs.writeFileSync(
     path.join(out, 'package.json'),
     JSON.stringify(
@@ -173,7 +201,7 @@ export default defineConfig({
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${name}</title>
+${fontsLink ? fontsLink + '\n' : ''}    <title>${name}</title>
   </head>
   <body>
     <div id="root"></div>
@@ -182,6 +210,10 @@ export default defineConfig({
 </html>
 `
   );
+  if (fontsLink) {
+    const familyCount = (fontsLink.match(/family=/g) || []).length;
+    console.log(`[4/4] injected Google Fonts (${familyCount} family)`);
+  }
   fs.writeFileSync(
     path.join(out, 'src', 'main.jsx'),
     `import React from 'react';
@@ -207,7 +239,7 @@ function main() {
   cropVideoPlaceholders(args.cache, outSrc);
   emit(args.cache, outSrc);
   copyAssets(args.cache, outSrc, args.out);
-  scaffoldVite(args.out, args.projectName);
+  scaffoldVite(args.out, args.projectName, args.cache);
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
   console.log(
