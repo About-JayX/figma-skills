@@ -1,0 +1,46 @@
+{
+  "name": "figma-skills",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sync:bridge-config": "node ./figma/scripts/sync_ws_defs_config.mjs",
+    "build:ws-defs-ui": "node ./figma/scripts/build_ws_defs_ui.mjs",
+    "build:ws-defs-ui-html": "node ./figma/scripts/build_ws_defs_ui_html.mjs",
+    "build:legacy": "npm run sync:bridge-config && npm run build:ws-defs-ui && npm run build:ws-defs-ui-html && node ./figma/scripts/build_ws_defs_bundle.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"figma/**/*.{ts,tsx,mts,cts}\"",
+    "lint:fix": "npm run lint -- --fix",
+    "verify:artifacts": "node ./figma/scripts/verify_generated_artifacts.mjs",
+    "verify:bridge": "node ./figma/scripts/verify_bridge_smoke.mjs",
+    "verify:chunks": "node ./figma/scripts/verify_result_chunk_limits.mjs",
+    "verify:asset-route": "node ./figma/scripts/verify_image_asset_route.mjs",
+    "verify:filekey": "node ./figma/scripts/verify_filekey_routing.mjs",
+    "verify:svg-blobs": "node ./figma/scripts/verify_svg_blob_route.mjs",
+    "verify:payload-diagnostics": "node ./figma/scripts/verify_payload_diagnostics.mjs",
+    "lint:reproduction": "node ./figma/scripts/lint_reproduction.mjs",
+    "render:ready": "node ./figma/scripts/render_ready.mjs",
+    "codegen": "node ./figma/scripts/codegen_pipeline.mjs",
+    "verify:loop": "node ./figma/scripts/verify_loop.mjs",
+    "corpus:ingest": "node ./figma/scripts/ingest_corpus_sample.mjs",
+    "regression:corpus": "node ./figma/scripts/regression_corpus.mjs",
+    "test:ssim-guard": "node ./figma/scripts/test_ssim_guard.mjs",
+    "test:baseline": "node ./figma/scripts/test_baseline_b1_b2_b3.mjs",
+    "verify:auto": "npm run typecheck && npm run lint && npm run build:legacy && npm run verify:artifacts && npm run verify:bridge && npm run verify:chunks && npm run verify:asset-route && npm run verify:filekey && npm run verify:svg-blobs && npm run verify:payload-diagnostics",
+    "verify": "npm run verify:auto"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.29.2",
+    "@babel/traverse": "^7.29.0",
+    "@figma/eslint-plugin-figma-plugins": "*",
+    "@figma/plugin-typings": "*",
+    "@types/node": "22",
+    "@typescript-eslint/eslint-plugin": "6",
+    "@typescript-eslint/parser": "6",
+    "esbuild": "0.25",
+    "eslint": "8",
+    "postcss": "^8.5.10",
+    "typescript": "5"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "verbatimModuleSyntax": true,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@figma"
+    ]
+  },
+  "include": [
+    "figma/**/*.ts",
+    "figma/**/*.tsx",
+    "figma/**/*.mts",
+    "figma/**/*.cts",
+    "figma/**/*.d.ts"
+  ],
+  "exclude": [
+    "figma/cache/**",
+    "figma/assets/**",
+    "figma/ws_defs/code.js"
+  ]
+}
