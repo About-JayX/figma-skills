@@ -102,6 +102,31 @@ function hasCJK(s) {
   return CJK_RE.test(String(s || ''));
 }
 
+function normalizeExplicitLineBreaks(s) {
+  return String(s || '')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\u2028/g, '\n')
+    .replace(/\\u2029/g, '\n');
+}
+
+function hasExplicitLineBreak(s) {
+  return /(?:\r\n|\r|\n|\u2028|\u2029|\\r\\n|\\n|\\r|\\u2028|\\u2029)/.test(normalizeExplicitLineBreaks(s));
+}
+
+function textHasExplicitLineBreak(node) {
+  if (!node?.text) return false;
+  return hasExplicitLineBreak(node.text.content || '') || (node.text.runs || []).some((r) => hasExplicitLineBreak(r.content));
+}
+
+function isSingleLineTextNode(node) {
+  if (node?.role !== 'text' || !node.text) return false;
+  const fs = typeof node.text.fontSize === 'number' ? node.text.fontSize : 0;
+  const h = node.box?.height ?? null;
+  return h != null && (fs ? h <= fs * 1.5 + 0.5 : h <= 30);
+}
+
 // Quantize Figma's variable-font weights (e.g. 380, 450, 330) to the nearest
 // 100-step. Fallback fonts (PingFang SC, system-ui) only ship static cuts, so a
 // raw `font-weight: 450` collapses to 400 and makes headings look unbold.
@@ -235,7 +260,9 @@ function emitRule(node, parentNode, indexById) {
   // FIXED boundary and into sibling gaps.
   if (emitWidth && node.box.width != null) {
     if (node.role === 'text') {
-      // skip — natural sizing
+      if (!isSingleLineTextNode(node) || textHasExplicitLineBreak(node)) {
+        decls.push(['width', px(node.box.width)]);
+      }
     } else if (node.sizingH === 'HUG') {
       decls.push(['min-width', px(node.box.width)]);
     } else {
@@ -277,7 +304,10 @@ function emitRule(node, parentNode, indexById) {
   // Skip bg for text role — render_ready puts fills color into style.bg, but TEXT fills
   // are the *foreground* text color (handled below via node.text.color). Emitting it as
   // background-color makes every text span render as a colored rectangle.
-  if (node.style.bg && node.role !== 'vector' && node.role !== 'text') {
+  const hasRenderableBg = node.role !== 'vector' && node.role !== 'text';
+  if (node.style.bgGradient && hasRenderableBg) {
+    decls.push(['background', node.style.bgGradient]);
+  } else if (node.style.bg && hasRenderableBg) {
     decls.push(['background-color', node.style.bg]);
   }
   // Image role with no resolvable path (VIDEO fills, or missing image asset):
@@ -285,7 +315,17 @@ function emitRule(node, parentNode, indexById) {
   if (node.role === 'image' && !node.image?.path && node.image?.fallbackColor) {
     decls.push(['background-color', node.image.fallbackColor]);
   }
-  if (node.style.borderColor && node.role !== 'vector') {
+  if (node.style.borderGradient && node.role !== 'vector' && node.style.borderWidth) {
+    const radiusForBg = formatRadii(node.style.borderRadii || node.style.borderRadius) || '0px';
+    const fillLayer = node.style.bgGradient
+      ? node.style.bgGradient
+      : node.style.bg
+        ? `linear-gradient(${node.style.bg}, ${node.style.bg})`
+        : 'linear-gradient(transparent, transparent)';
+    decls.push(['border', `${px(node.style.borderWidth)} solid transparent`]);
+    decls.push(['background', `${fillLayer} padding-box, ${node.style.borderGradient} border-box`]);
+    decls.push(['border-radius', radiusForBg]);
+  } else if (node.style.borderColor && node.role !== 'vector') {
     const perSide = node.style.borderWidths;
     if (perSide) {
       const sides = ['top', 'right', 'bottom', 'left'];
@@ -329,7 +369,13 @@ function emitRule(node, parentNode, indexById) {
     // Skip emitting #000 color so text inherits from body (which can be #fff on dark designs).
     // Figma sometimes exports "color: #000000" for text that visually renders white due to
     // component-instance inversion or parent blend modes — inheriting is safer than hard-setting black.
-    if (node.text.color && node.text.color.toLowerCase() !== '#000000' && node.text.color !== '#000') {
+    if (node.style.bgGradient) {
+      decls.push(['background', node.style.bgGradient]);
+      decls.push(['background-clip', 'text']);
+      decls.push(['-webkit-background-clip', 'text']);
+      decls.push(['color', 'transparent']);
+      decls.push(['-webkit-text-fill-color', 'transparent']);
+    } else if (node.text.color && node.text.color.toLowerCase() !== '#000000' && node.text.color !== '#000') {
       decls.push(['color', node.text.color]);
     }
     if (node.text.textAlign) decls.push(['text-align', node.text.textAlign]);
@@ -344,15 +390,15 @@ function emitRule(node, parentNode, indexById) {
       decls.push(['word-break', 'keep-all']);
       decls.push(['overflow-wrap', 'break-word']);
     }
+    const explicitLineBreak = textHasExplicitLineBreak(node);
     // Single-line heuristic: Figma stores width exactly fitting one line; browser font
     // metrics diverge slightly, so text can wrap unexpectedly (e.g. "How-to" at the hyphen).
     // fontSize may be null for text inside COMPONENT INSTANCES (bridge doesn't expose segments
     // there), so fall back to a raw height threshold — 30px covers any realistic body-text
     // line height. Multi-line text has height ≥ ~2× line-height, well above this threshold.
-    const fs = typeof node.text.fontSize === 'number' ? node.text.fontSize : 0;
-    const h = node.box?.height ?? null;
-    const singleLine = h != null && (fs ? h <= fs * 1.5 + 0.5 : h <= 30);
-    if (singleLine) decls.push(['white-space', 'nowrap']);
+    const singleLine = isSingleLineTextNode(node);
+    if (explicitLineBreak) decls.push(['white-space', 'pre-line']);
+    else if (singleLine) decls.push(['white-space', 'nowrap']);
   }
 
   // clipsContent

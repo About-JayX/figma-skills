@@ -15,6 +15,23 @@ function escJsx(s) {
   return String(s ?? '').replace(/[{<>]/g, (ch) => ({ '{': '&#123;', '<': '&lt;', '>': '&gt;' }[ch]));
 }
 
+function normalizeExplicitLineBreaks(s) {
+  return String(s ?? '')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\u2028/g, '\n')
+    .replace(/\\u2029/g, '\n');
+}
+
+function splitExplicitLineBreaks(s) {
+  return normalizeExplicitLineBreaks(s).split(/\r\n|\r|\n|\u2028|\u2029/);
+}
+
+function hasExplicitLineBreaks(s) {
+  return /(?:\r\n|\r|\n|\u2028|\u2029|\\r\\n|\\n|\\r|\\u2028|\\u2029)/.test(String(s ?? ''));
+}
+
 function camelCaseCssProp(prop) {
   return String(prop ?? '').replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 }
@@ -30,7 +47,22 @@ function renderInlineStyle(style) {
 
 function renderTextRuns(runs) {
   return runs
-    .map((run) => `<span${renderInlineStyle(run.style)}>${escJsx(run.content)}</span>`)
+    .map((run) => {
+      const style = renderInlineStyle(run.style);
+      if (!hasExplicitLineBreaks(run.content)) {
+        return `<span${style}>${escJsx(run.content)}</span>`;
+      }
+      return splitExplicitLineBreaks(run.content)
+        .map((part, index) => `${index > 0 ? '<br />' : ''}<span${style}>${escJsx(part)}</span>`)
+        .join('');
+    })
+    .join('');
+}
+
+function renderTextContent(content) {
+  if (!hasExplicitLineBreaks(content)) return escJsx(content);
+  return splitExplicitLineBreaks(content)
+    .map((part, index) => `${index > 0 ? '<br />' : ''}${escJsx(part)}`)
     .join('');
 }
 
@@ -46,7 +78,7 @@ function renderNode(node, indexById, imageImports, depth = 0) {
     if (runs?.length) {
       return `${pad}<span className="${cls}" id="${id}">${renderTextRuns(runs)}</span>`;
     }
-    return `${pad}<span className="${cls}" id="${id}">${escJsx(content)}</span>`;
+    return `${pad}<span className="${cls}" id="${id}">${renderTextContent(content)}</span>`;
   }
 
   // VECTOR — emit <img src> with absolute /svg/ path (served from public/)

@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { buildOutline } from './lib/outline.mjs';
 import { collapseVectorGroups } from './lib/vector_collapse.mjs';
+import { gradientListToCss } from './lib/gradient_to_css.mjs';
 
 const GEOMETRY_TOL = 0.5;
 
@@ -28,12 +29,12 @@ function classNameFor(node) {
   return `n-${sanitizeId(node.id)}`;
 }
 
-function rgba(c) {
+function rgba(c, opacityMul = 1) {
   if (!c) return null;
   const r = Math.round((c.r ?? 0) * 255);
   const g = Math.round((c.g ?? 0) * 255);
   const b = Math.round((c.b ?? 0) * 255);
-  const a = c.a ?? 1;
+  const a = Math.max(0, Math.min(1, (c.a ?? 1) * opacityMul));
   if (a >= 0.999) return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
   return `rgba(${r}, ${g}, ${b}, ${+a.toFixed(3)})`;
 }
@@ -54,11 +55,12 @@ function effectiveGapFromAbs(children, isH) {
 
 // ────────────── resolve per-node style ──────────────
 
-function resolveSolidPaint(paints) {
+function resolveSolidPaint(paints, options = {}) {
   if (!Array.isArray(paints)) return null;
-  for (const p of paints) {
+  const ordered = options.preferLast ? [...paints].reverse() : paints;
+  for (const p of ordered) {
     if (p?.visible === false) continue;
-    if (p?.type === 'SOLID') return rgba(p.color);
+    if (p?.type === 'SOLID') return rgba(p.color, p.opacity ?? 1);
   }
   return null;
 }
@@ -266,7 +268,7 @@ function buildTextRun(node, parsedCss) {
       if (ls?.unit === 'PERCENT') return `${+((ls.value ?? 0) / 100).toFixed(4)}em`;
       return parsedCss['letter-spacing'] || null;
     })(),
-    color: resolveSolidPaint(s.fills) || parsedCss['color'] || null,
+    color: resolveSolidPaint(s.fills, { preferLast: true }) || parsedCss['color'] || null,
     textAlign: parsedCss['text-align'] || null,
     textTransform: parsedCss['text-transform'] || null,
     textDecoration: parsedCss['text-decoration'] || null,
@@ -394,6 +396,9 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
       parentId,
       type: node.type,
       role,
+      routeHint: node.replay?.routeHint || 'DOM_NATIVE',
+      verificationTier: node.replay?.verificationTier || null,
+      requiresVisualVerification: !!node.replay?.requiresVisualVerification,
       name: node.name,
       childrenOrder: kids.map((c) => c.id),
       box: {
@@ -430,8 +435,13 @@ function buildRenderReady(root, assetsIndex, svgIndex) {
       maxHeight: layout.maxHeight ?? null,
       clipsContent: !!layout.clipsContent,
       style: {
-        bg: resolveSolidPaint(style.fills) ?? resolveSolidPaint(style.backgrounds) ?? null,
+        bg: resolveSolidPaint(style.backgrounds) ?? resolveSolidPaint(style.fills) ?? null,
+        bgGradient:
+          gradientListToCss(style.backgrounds, { width: layout.width, height: layout.height }) ||
+          gradientListToCss(style.fills, { width: layout.width, height: layout.height }) ||
+          null,
         borderColor: resolveSolidPaint(style.strokes),
+        borderGradient: gradientListToCss(style.strokes, { width: layout.width, height: layout.height }) || null,
         borderWidth: style.strokeWeight || null,
         // Per-side stroke weights (Figma stores asymmetric borders here, e.g. list-item
         // dividers with only top:1 / other:0). If omitted, all sides use borderWidth.

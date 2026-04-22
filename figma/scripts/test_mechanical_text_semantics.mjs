@@ -6,6 +6,8 @@
 //   M4: emit_css emits text-transform for TEXT nodes
 //   M5: emit_css emits text-decoration for TEXT nodes
 //   M6: emit_css emits richer fallback stacks for app fonts
+//   M10: explicit line breaks are preserved in starter JSX/CSS
+//   M11: multiline text keeps Figma width constraints in mechanical CSS
 
 import fs from 'fs';
 import os from 'os';
@@ -348,6 +350,82 @@ for (const { id, expect } of [
   const re = new RegExp(`\\.n-${id}\\s*\\{[^}]*font-weight:\\s*${expect};`);
   assert(re.test(cssWeight), `M9: weight for .n-${id} quantized to ${expect}`);
 }
+
+// M10: explicit line breaks in content should survive mechanical starter output.
+const rrBreakPath = path.join(tmp, 'rr-breaks.json');
+fs.writeFileSync(
+  rrBreakPath,
+  JSON.stringify({
+    schemaVersion: 1,
+    rootId: '1:1',
+    rootClass: 'n-1-1',
+    palette: [],
+    assetsManifest: [],
+    svgManifest: [],
+    nodes: [
+      { id: '1:1', className: 'n-1-1', parentId: null, type: 'FRAME', role: 'container', rendered: true,
+        childrenOrder: ['1:2'], box: { width: 320, height: 120, absX: 0, absY: 0 },
+        flex: null, positioning: 'AUTO', clipsContent: false, style: {}, text: null, image: null, vector: null },
+      { id: '1:2', className: 'n-1-2', parentId: '1:1', type: 'TEXT', role: 'text', rendered: true,
+        childrenOrder: [], box: { width: 220, height: 66, absX: 10, absY: 10 }, flex: null,
+        positioning: 'AUTO', clipsContent: false, style: {}, image: null, vector: null,
+        text: { content: 'First line\\nSecond line', fontFamily: 'PingFang SC', fontSize: 14, fontWeight: '400',
+                lineHeight: '22px', letterSpacing: '0px', color: '#ffffff', textAlign: 'left',
+                textTransform: null, textDecoration: null, runs: null } },
+    ], skipped: [], stats: {},
+  }, null, 2)
+);
+const jsxBreakOut = path.join(tmp, 'App-breaks.jsx');
+const emitJsxBreak = spawnSync(process.execPath, [path.join(__dirname, 'emit_jsx.mjs'), rrBreakPath, jsxBreakOut], { encoding: 'utf8' });
+if (emitJsxBreak.status !== 0) {
+  console.error('emit_jsx (breaks) failed:', emitJsxBreak.stderr);
+  process.exit(1);
+}
+const jsxBreak = fs.readFileSync(jsxBreakOut, 'utf8');
+assert(/First line[\s\S]*<br \/>[\s\S]*Second line/.test(jsxBreak), 'M10: JSX keeps explicit line breaks with <br />');
+
+const cssBreakOut = path.join(tmp, 'App-breaks.css');
+const emitCssBreak = spawnSync(process.execPath, [path.join(__dirname, 'emit_css.mjs'), rrBreakPath, cssBreakOut], { encoding: 'utf8' });
+if (emitCssBreak.status !== 0) {
+  console.error('emit_css (breaks) failed:', emitCssBreak.stderr);
+  process.exit(1);
+}
+const cssBreak = fs.readFileSync(cssBreakOut, 'utf8');
+assert(cssBreak.includes('white-space: pre-line;'), 'M10: CSS uses pre-line for explicit line breaks');
+
+// M11: multiline text without explicit line breaks should still keep its measured width
+// so browser reflow matches Figma instead of expanding to max-content width.
+const rrWrapPath = path.join(tmp, 'rr-wrap.json');
+fs.writeFileSync(
+  rrWrapPath,
+  JSON.stringify({
+    schemaVersion: 1,
+    rootId: '1:1',
+    rootClass: 'n-1-1',
+    palette: [],
+    assetsManifest: [],
+    svgManifest: [],
+    nodes: [
+      { id: '1:1', className: 'n-1-1', parentId: null, type: 'FRAME', role: 'container', rendered: true,
+        childrenOrder: ['1:2'], box: { width: 320, height: 120, absX: 0, absY: 0 },
+        flex: null, positioning: 'AUTO', clipsContent: false, style: {}, text: null, image: null, vector: null },
+      { id: '1:2', className: 'n-1-2', parentId: '1:1', type: 'TEXT', role: 'text', rendered: true,
+        childrenOrder: [], box: { width: 180, height: 66, absX: 10, absY: 10 }, flex: null,
+        positioning: 'AUTO', clipsContent: false, style: {}, image: null, vector: null,
+        text: { content: 'This paragraph should wrap within the Figma text box width.', fontFamily: 'Inter', fontSize: 14, fontWeight: '400',
+                lineHeight: '22px', letterSpacing: '0px', color: '#ffffff', textAlign: 'left',
+                textTransform: null, textDecoration: null, runs: null } },
+    ], skipped: [], stats: {},
+  }, null, 2)
+);
+const cssWrapOut = path.join(tmp, 'App-wrap.css');
+const emitCssWrap = spawnSync(process.execPath, [path.join(__dirname, 'emit_css.mjs'), rrWrapPath, cssWrapOut], { encoding: 'utf8' });
+if (emitCssWrap.status !== 0) {
+  console.error('emit_css (wrap) failed:', emitCssWrap.stderr);
+  process.exit(1);
+}
+const cssWrap = fs.readFileSync(cssWrapOut, 'utf8');
+assert(/\.n-1-2\s*\{[^}]*width: 180px;[^}]*\}/s.test(cssWrap), 'M11: multiline text keeps its measured width in CSS');
 
 console.log(`\n── Total: ${passed} passed, ${failed} failed ──`);
 fs.rmSync(tmp, { recursive: true, force: true });

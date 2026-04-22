@@ -33,10 +33,20 @@ This skill is a reusable template for many different designs. It must not be tre
 Treat this skill as a generic:
 
 ```text
-Figma URL / node ID -> bridge -> codegen -> refactor -> verify
+Figma URL / node ID -> bridge -> mechanical baseline -> AI implementation -> verify -> repair
 ```
 
 workflow, not as a one-off case note.
+
+## Workflow Authority
+
+`SKILL.md` is the single source of truth for reproduction workflow and execution order.
+
+Rules:
+
+- If any supporting doc in `docs/` or elsewhere appears to describe a different order, follow `SKILL.md`.
+- Architecture / review docs may explain rationale, module boundaries, and implementation plans, but they must not redefine the canonical operator workflow.
+- Verification policy still lives in `references/09-verification.md`, but the surrounding execution sequence lives here.
 
 ## References
 
@@ -83,6 +93,8 @@ Do not edit JSX/CSS before you have:
 
 Skipping the first verification pass is forbidden.
 
+The first mechanical output is a starting point, not the final implementation.
+
 ### Workflow 2 — Read Diagnostics Before Choosing a Delivery Mode
 
 Read first:
@@ -94,24 +106,39 @@ Read first:
 
 Only then decide:
 
-- whether the delivery mode should be `DOM-first`, `Hybrid-SVG`, or `Visual-lock`
+- whether the DOM structure is already viable or which DOM/layout/text issues need correction
 - whether the gap is layout drift, text drift, color drift, or hard-node drift
-- whether route escalation is required
+- which elements are true SVG/vector elements and may stay SVG
 
 Do not choose an overlay or lock strategy before reading the actual diff evidence.
 
-### Workflow 3 — Refactor in the Main Session Only
+### Workflow 3 — AI Implementation Pass in the Main Session
+
+In an interactive agent session, AI implementation is a required stage for repository code output. Start from the current generated output, but do not treat the mechanical JSX/CSS as final unless the verification evidence already shows it is acceptable.
+
+In autonomous CLI mode, the helper pipeline can only run this stage when an AI command is configured via `--ai-implement-cmd` or `FIGMA_AI_IMPLEMENT_CMD`. If neither is configured, the CLI path stops at mechanical output + verify and the implementation pass must happen in the interactive agent session instead.
+
+Build the implementation pass from structured context in this order:
+
+- `implementation-context.json` when present
+- otherwise `render-ready.json`, `bridge-agent-payload.json`, first `_verify/verify-report.json`, first `scorecard*.json`, `lint-report.json`, token/variable sidecars, and asset manifests
 
 Change only the current generated output:
 
-- preserve `className (n-<id>)` and `id`
+- preserve `className (n-<id>)` and `id`, or keep an explicit traceability wrapper when swapping in an existing repo component
 - prefer the smallest effective change set
+- Prefer existing repo components, tokens, and semantic structure over raw `div` recreation
+- adapt the result to the repo's file structure, layout primitives, and naming conventions
 - if staying on a DOM route, fix structure, typography, spacing, alignment, and semantics
-- if the node is hard-route driven, escalate with `SVG_ISLAND`, `CANVAS_ISLAND`, or `RASTER_LOCK`
+- only emit SVG when the element itself is a true SVG/vector element from Figma data
+- do not turn ordinary DOM containers, text blocks, or image sections into SVG islands as a fidelity shortcut
 
 Do not:
 
+- treat the mechanical starter as the final implementation by default
 - turn an unverified guess into final structure
+- optimize for screenshot parity by silently sacrificing real DOM, semantics, or interaction
+- use `SVG_ISLAND`, page-level image overlays, or full-page SVG/image cover layers unless the user explicitly approves an exception
 - start with broad cleanup or beautification before fidelity is under control
 
 ### Workflow 4 — Re-Verify After Every Meaningful Change
@@ -133,10 +160,10 @@ Do not stack multiple major structure changes and verify only once at the end.
 
 Recommended cadence:
 
-1. Mechanical baseline
-2. First targeted fix
-3. Second route / text / layout convergence pass
-4. If still not converging, manually decide whether to enter `Visual-lock` or `RASTER_LOCK`
+1. Mechanical baseline + first verify
+2. First AI implementation pass
+3. Second AI / text / layout / DOM convergence pass
+4. If still not converging, stop and diagnose the mechanical starter, typography, layout, or source design data instead of introducing overlay shortcuts
 
 If three rounds do not clearly converge:
 
@@ -166,7 +193,7 @@ These shortcuts directly reduce reproduction quality:
 The rule is:
 
 ```text
-baseline first -> diagnostics second -> routing decision third -> minimal fix -> re-verify -> claim alignment last
+baseline first -> diagnostics second -> routing decision third -> AI implementation fourth -> re-verify -> claim alignment last
 ```
 
 ## Delivery Modes
@@ -181,10 +208,13 @@ Three delivery modes are supported for web reproduction:
 
 Rules:
 
-- Start with `DOM-first` by default.
-- Escalate to `Hybrid-SVG` when a subtree is hard-node dominated or scorecard results repeatedly indicate hard-node drift.
-- Escalate to `Visual-lock` only when most remaining error comes from hard/decorative surfaces and the page has weak interaction requirements.
+- Start with `DOM-first` by default and keep it as the active workflow unless the user explicitly requests an exception.
+- For the current workflow, do not use `Hybrid-SVG` or `Visual-lock` as automatic fallback strategies.
+- Do not use page-level image overlays or full-page SVG/image cover layers unless the user explicitly approves that trade-off.
+- Only actual SVG/vector elements may be emitted as SVG.
+- Do not escalate ordinary text, ordinary auto-layout containers, or ordinary image content to `SVG_ISLAND` just because they are visually difficult.
 - If you use `Hybrid-SVG` or `Visual-lock`, the final report must explicitly state the delivery mode and the locked regions.
+- Higher visual parity under `Visual-lock` is not a higher real DOM fidelity result.
 
 ### Locked Regions
 
@@ -201,13 +231,14 @@ for traceability, audits, and later refactors.
 
 ## Overlay / Island Constraints
 
-When using `SVG_ISLAND`, `CANVAS_ISLAND`, or `RASTER_LOCK` overlays:
+When using any allowed overlay or island exception:
 
 - Prefer subtree-level locking before page-level locking.
 - Only use page-level locking when most remaining drift comes from page-wide decorative surfaces and interaction is weak.
 - Preserve original `id` and `className`.
 - Overlay layers must default to `aria-hidden="true"`.
 - Elements that need real click, hover, or focus must remain above the overlay, or be removed from the locked region.
+- A full-page image-style cover layer is forbidden unless the user explicitly asks for or approves it.
 - If the whole page is overlay-locked, the report must say this is `Visual-lock`, not pure DOM fidelity.
 - `SVG_ISLAND` internals are not judged by ordinary flex-box decomposition; they are judged by route correctness plus visual verification.
 
@@ -250,7 +281,7 @@ Rules:
 - `node.style.opacity === 0` -> do not render
 - `fills[].visible === false` -> skip that fill layer only
 
-### Step 3 — Write Code
+### Step 3 — Write Mechanical Starter, Then AI Implementation
 
 #### Step 3a — Direct Generation (Preferred)
 
@@ -285,13 +316,21 @@ This outputs a single React component plus:
 
 for consumers who want to embed the result into an existing project.
 
-The agent’s job after generation is limited to:
+The AI implementation pass after generation must:
 
-1. Renaming the component if needed
-2. Swapping in semantic tags where appropriate
-3. Adding interactivity or state
-4. Wiring `RESET_CSS` / `FONTS_HREF` in skeleton mode
-5. Copying or symlinking assets in skeleton mode
+1. Build or consume structured implementation context from the generated artifacts
+2. Replace raw structural output with existing repo components where mappings or strong heuristics exist
+3. Swap in semantic tags where appropriate
+4. Add interactivity or state
+5. Wire `RESET_CSS` / `FONTS_HREF` in skeleton mode
+6. Copy or symlink assets in skeleton mode
+7. Preserve traceability (`id`, `className`, wrappers, or an explicit mapping) for later verification
+
+Autonomous CLI note:
+
+- `codegen_pipeline.mjs` writes `implementation-context.json`
+- `figma_pipeline.mjs --auto` only runs the AI implementation stage automatically when `--ai-implement-cmd` or `FIGMA_AI_IMPLEMENT_CMD` is configured
+- the AI command template must consume the structured context and diagnostics, not just the project directory
 
 Do not re-translate bridge fields or recompute CSS that the generator already emitted.
 
